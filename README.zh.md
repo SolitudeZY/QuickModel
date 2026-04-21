@@ -48,7 +48,7 @@ python main.py
 
 ### 下载预编译 .exe
 
-从 [Releases](https://github.com/SolitudeZY/QuickModel/release) 下载 `QuickModel.exe`，双击直接运行，无需安装。
+从 [Releases](https://github.com/SolitudeZY/QuickModel/releases) 下载 `QuickModel.exe`，双击直接运行，无需安装。
 
 ## 打包
 
