@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Desktop Assistant</title>
+<link rel="stylesheet" href="vendor/katex.min.css">
+<link rel="stylesheet" href="vendor/github-dark.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- ── 侧边栏 ── -->
+<aside id="sidebar">
+  <div id="sidebar-top">
+    <button id="btn-new-conv" class="btn-primary">+ 新对话</button>
+  </div>
+  <div id="conv-list-wrap">
+    <ul id="conv-list"></ul>
+  </div>
+  <div id="sidebar-bottom">
+    <input id="search-input" type="text" placeholder="搜索对话...">
+    <div id="context-bar-wrap">
+      <div id="context-bar-label"><span id="ctx-used">0</span> / <span id="ctx-total">80k</span> tokens</div>
+      <div id="context-bar-track"><div id="context-bar-fill"></div></div>
+      <div id="context-bar-hint"></div>
+    </div>
+  </div>
+</aside>
+
+<!-- ── 主区域 ── -->
+<main id="main">
+  <!-- 工具栏 -->
+  <header id="toolbar">
+    <select id="model-select"></select>
+    <span id="conv-title"></span>
+    <div id="toolbar-right">
+      <button id="btn-thinking" class="btn-ghost" title="切换思考模式">💭 思考</button>
+      <button id="btn-slash" class="btn-ghost" title="命令菜单">⌘ 命令</button>
+      <button id="btn-export" class="btn-ghost">导出</button>
+      <button id="btn-settings" class="btn-ghost">设置</button>
+    </div>
+  </header>
+
+  <!-- 对话区 + Todo 面板 -->
+  <div id="content-area">
+    <div id="chat-area">
+      <div id="chat-messages"></div>
+    </div>
+    <!-- Todo 面板（模型使用 todo_write 时显示）-->
+    <div id="todo-panel" class="hidden">
+      <div id="todo-header">
+        <span>任务清单</span>
+        <button id="btn-todo-close">✕</button>
+      </div>
+      <ul id="todo-list"></ul>
+    </div>
+  </div>
+
+  <!-- 输入区 -->
+  <footer id="input-area">
+    <div id="file-chips"></div>
+    <!-- slash 命令补全 -->
+    <ul id="slash-menu" class="hidden"></ul>
+    <div id="input-row">
+      <textarea id="msg-input" placeholder="输入消息… (Enter 发送，Shift+Enter 换行)" rows="3"></textarea>
+      <div id="input-btns">
+        <button id="btn-send" class="btn-primary">发送</button>
+        <button id="btn-stop" class="btn-danger" disabled>停止</button>
+      </div>
+    </div>
+  </footer>
+</main>
+
+<!-- ── 设置弹窗 ── -->
+<div id="settings-overlay" class="overlay hidden">
+  <div id="settings-modal" class="modal">
+    <div class="modal-header">
+      <h2>设置</h2>
+      <button class="btn-close" id="btn-settings-close">✕</button>
+    </div>
+    <div class="modal-tabs">
+      <button class="tab-btn active" data-tab="models">模型配置</button>
+      <button class="tab-btn" data-tab="tools">工具设置</button>
+      <button class="tab-btn" data-tab="vision">图片理解</button>
+      <button class="tab-btn" data-tab="ui">界面设置</button>
+    </div>
+    <div class="modal-body">
+      <!-- 模型配置 -->
+      <div class="tab-panel active" id="tab-models">
+        <div class="model-layout">
+          <div class="model-list-col">
+            <button id="btn-add-model" class="btn-secondary">+ 添加</button>
+            <ul id="model-config-list"></ul>
+          </div>
+          <div class="model-form-col">
+            <label>名称<input type="text" id="mc-name" placeholder="配置名称"></label>
+            <label>API Key<input type="password" id="mc-key" placeholder="sk-..."></label>
+            <label>Base URL<input type="text" id="mc-url" placeholder="https://api.xxx.com/v1"></label>
+            <label>模型名<input type="text" id="mc-model" placeholder="model-name"></label>
+            <label>系统提示词<textarea id="mc-system" rows="4"></textarea></label>
+            <div class="form-row">
+              <button id="btn-save-mc" class="btn-primary">保存此配置</button>
+              <button id="btn-del-mc" class="btn-danger">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 工具设置 -->
+      <div class="tab-panel" id="tab-tools">
+        <label>Tavily API Key<input type="password" id="tavily-key" placeholder="tvly-..."></label>
+        <label>命令执行安全
+          <select id="cmd-safety">
+            <option value="confirm">confirm（每次确认）</option>
+            <option value="auto">auto（自动执行）</option>
+            <option value="disabled">disabled（禁用）</option>
+          </select>
+        </label>
+        <label>命令超时（秒）<input type="number" id="cmd-timeout" value="30" min="5" max="300"></label>
+      </div>
+      <!-- 图片理解 -->
+      <div class="tab-panel" id="tab-vision">
+        <p class="hint">拖拽图片到输入框时，调用 Vision 模型解析图片内容。</p>
+        <label>Vision API Key<input type="password" id="vision-key" placeholder="sk-..."></label>
+        <label>Base URL<input type="text" id="vision-url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"></label>
+        <label>模型名<input type="text" id="vision-model" placeholder="qwen-vl-max"></label>
+        <p class="hint">常用模型：qwen-vl-max / qwen-vl-plus / gpt-4o / glm-4v</p>
+      </div>
+      <!-- 界面设置 -->
+      <div class="tab-panel" id="tab-ui">
+        <label>主题
+          <select id="ui-theme">
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+          </select>
+        </label>
+        <label>字体大小
+          <select id="ui-fontsize">
+            <option value="12">12</option>
+            <option value="13" selected>13</option>
+            <option value="14">14</option>
+            <option value="15">15</option>
+            <option value="16">16</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-settings-cancel" class="btn-ghost">取消</button>
+      <button id="btn-settings-save" class="btn-primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 工具确认弹窗 ── -->
+<div id="confirm-overlay" class="overlay hidden">
+  <div id="confirm-modal" class="modal">
+    <div class="modal-header">
+      <h2 id="confirm-title">确认执行</h2>
+    </div>
+    <pre id="confirm-detail"></pre>
+    <div class="modal-footer">
+      <button id="btn-confirm-no" class="btn-ghost">拒绝</button>
+      <button id="btn-confirm-yes" class="btn-primary">允许</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── 重命名弹窗 ── -->
+<div id="rename-overlay" class="overlay hidden">
+  <div id="rename-modal" class="modal">
+    <div class="modal-header"><h2>重命名对话</h2></div>
+    <input type="text" id="rename-input" placeholder="输入新标题">
+    <div class="modal-footer">
+      <button id="btn-rename-cancel" class="btn-ghost">取消</button>
+      <button id="btn-rename-ok" class="btn-primary">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Skill 管理弹窗 ── -->
+<div id="skill-overlay" class="overlay hidden">
+  <div id="skill-modal" class="modal">
+    <div class="modal-header">
+      <h2>技能管理</h2>
+      <button class="btn-close" id="btn-skill-close">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex;gap:12px;padding:12px">
+      <div style="width:180px;flex-shrink:0;display:flex;flex-direction:column;gap:6px">
+        <button id="btn-skill-new" class="btn-secondary">+ 新建技能</button>
+        <ul id="skill-list" style="list-style:none;padding:0;margin:0;flex:1;overflow-y:auto"></ul>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+        <label>名称<input type="text" id="skill-name" placeholder="技能名称"></label>
+        <label>描述<input type="text" id="skill-desc" placeholder="一句话描述（供模型参考）"></label>
+        <label style="flex:1">内容<textarea id="skill-content" rows="10" style="width:100%;resize:vertical"></textarea></label>
+        <div class="form-row">
+          <button id="btn-skill-save" class="btn-primary">保存</button>
+          <button id="btn-skill-del" class="btn-danger">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/marked.min.js"></script>
+<script src="vendor/katex.min.js"></script>
+<script src="vendor/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

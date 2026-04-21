@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "Bash(python -c \"import ziamath; print\\(ziamath.__version__\\); m = ziamath.Math.fromlatex\\(r'x^2'\\); print\\(dir\\(m\\)\\)\")",
+      "Bash(python -c \"import matplotlib; import PIL; print\\('mpl ok'\\); print\\('pil ok'\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -c ':*)",
+      "Bash(conda run:*)",
+      "Bash(D:/miniconda/envs/ai_api/python.exe download_vendor.py)",
+      "Bash(curl:*)",
+      "Bash(D:/miniconda/envs/ai_api/python.exe main.py)",
+      "Bash(D:/miniconda/envs/ai_api/python.exe -c \"from app.webview_app import API, get_html_path; print\\('OK'\\)\")",
+      "Bash(D:/miniconda/envs/ai_api/python.exe -c ':*)",
+      "Bash(D:/miniconda/envs/ai_api/python.exe -c \"from app.agent import Agent; from app.webview_app import API; print\\('OK'\\)\")"
+    ]
+  }
+}

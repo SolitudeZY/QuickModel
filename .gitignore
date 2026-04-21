@@ -1,0 +1,25 @@
+# Build output
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.env
+
+# App data
+conversations/
+*.jpg
+*.png
+*.pdf
+
+# Misc test/temp files
+矩阵运算*.md
+newton_bisection.tex
+
+# IDE
+.vscode/
+.idea/
