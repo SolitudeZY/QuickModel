@@ -38,7 +38,7 @@ English | [中文](./README.zh.md)
 ### Run from source
 
 ```bash
-git clone https://github.com/your-username/quick-model.git
+git clone https://github.com/SolitudeZY/QuickModel.git
 cd quick-model
 
 pip install -r requirements.txt
@@ -48,7 +48,7 @@ python main.py
 
 ### Download pre-built .exe
 
-Download `QuickModel.exe` from [Releases](https://github.com/your-username/quick-model/releases) and run directly. No installation needed.
+Download `QuickModel.exe` from [Releases](https://github.com/SolitudeZY/QuickModel/releases) and run directly. No installation needed.
 
 ## Build
 
