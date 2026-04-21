@@ -269,19 +269,46 @@ function addToolCallBubble(toolName, args) {
   const div = document.createElement('div');
   div.className = 'bubble bubble-tool-call';
   const argsStr = JSON.stringify(args, null, 2);
-  div.innerHTML = `<div class="bubble-label">🔧 Tool Call: ${escapeHtml(toolName)}</div><pre style="font-size:11px;white-space:pre-wrap;margin-top:4px">${escapeHtml(argsStr)}</pre>`;
+  const icons = { web_search:'🔍', read_file:'📄', run_command:'⚙️', write_file:'✏️', list_directory:'📁' };
+  const icon = icons[toolName] || '🔧';
+  div.innerHTML = `
+    <div class="tool-header" onclick="this.parentElement.classList.toggle('tool-expanded')">
+      <span class="tool-icon">${icon}</span>
+      <span class="tool-name">${escapeHtml(toolName)}</span>
+      <span class="tool-args-preview">${escapeHtml(JSON.stringify(args).slice(0,80))}${JSON.stringify(args).length>80?'…':''}</span>
+      <span class="tool-chevron">▶</span>
+    </div>
+    <div class="tool-body">
+      <div class="tool-section-label">参数</div>
+      <pre class="tool-pre">${escapeHtml(argsStr)}</pre>
+      <div class="tool-section-label tool-result-label">结果</div>
+      <div class="tool-result-content">等待中…</div>
+    </div>`;
   chatMessages.appendChild(div);
   scrollToBottom();
   return div;
 }
 
 function addToolResultBubble(toolName, result) {
+  // find the last tool-call bubble for this tool and update its result inline
+  const bubbles = chatMessages.querySelectorAll('.bubble-tool-call');
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const nameEl = bubbles[i].querySelector('.tool-name');
+    if (nameEl && nameEl.textContent === toolName) {
+      const resultEl = bubbles[i].querySelector('.tool-result-content');
+      if (resultEl && resultEl.textContent === '等待中…') {
+        const preview = result.replace(/\n/g,' ').trim().slice(0, 200) + (result.length > 200 ? '…' : '');
+        resultEl.textContent = preview;
+        return;
+      }
+    }
+  }
+  // fallback: orphaned result bubble
+  const div = document.createElement('div');
+  div.className = 'bubble bubble-tool-call';
   const icons = { web_search:'🔍', read_file:'📄', run_command:'⚙️', write_file:'✏️', list_directory:'📁' };
   const icon = icons[toolName] || '🔧';
-  const preview = result.replace(/\n/g,' ').trim().slice(0, 150) + (result.length > 150 ? '…' : '');
-  const div = document.createElement('div');
-  div.className = 'bubble bubble-tool-result';
-  div.innerHTML = `<div class="bubble-label">${icon} ${escapeHtml(toolName)}</div><div style="margin-top:3px">${escapeHtml(preview)}</div>`;
+  div.innerHTML = `<div class="tool-header"><span class="tool-icon">${icon}</span><span class="tool-name">${escapeHtml(toolName)}</span></div>`;
   chatMessages.appendChild(div);
   scrollToBottom();
 }
@@ -408,6 +435,8 @@ window.Chat = {
   showConfirmDialog(toolName, args) {
     $('confirm-title').textContent = `确认执行：${toolName}`;
     $('confirm-detail').textContent = JSON.stringify(args, null, 2);
+    _confirmCommand = args.command || '';
+    $('btn-confirm-always').style.display = (toolName === 'run_command' && _confirmCommand) ? '' : 'none';
     $('confirm-overlay').classList.remove('hidden');
   },
 };
@@ -417,6 +446,7 @@ function removeTypingIndicator() {
 }
 
 // ── Confirm dialog ────────────────────────────────────────────────
+let _confirmCommand = '';
 $('btn-confirm-yes').addEventListener('click', () => {
   $('confirm-overlay').classList.add('hidden');
   window.pywebview.api.confirm_tool(true);
@@ -424,6 +454,10 @@ $('btn-confirm-yes').addEventListener('click', () => {
 $('btn-confirm-no').addEventListener('click', () => {
   $('confirm-overlay').classList.add('hidden');
   window.pywebview.api.confirm_tool(false);
+});
+$('btn-confirm-always').addEventListener('click', () => {
+  $('confirm-overlay').classList.add('hidden');
+  window.pywebview.api.confirm_tool_always(_confirmCommand);
 });
 
 // ── Send message ──────────────────────────────────────────────────
@@ -711,6 +745,16 @@ $('btn-settings').addEventListener('click', openSettings);
 $('btn-settings-close').addEventListener('click', () => $('settings-overlay').classList.add('hidden'));
 $('btn-settings-cancel').addEventListener('click', () => $('settings-overlay').classList.add('hidden'));
 $('btn-settings-save').addEventListener('click', saveSettings);
+$('btn-allowlist-save').addEventListener('click', async () => {
+  const cmds = $('allowlist-cmds').value.split('\n').map(s => s.trim()).filter(Boolean);
+  await window.pywebview.api.save_allowed_commands_api(cmds);
+  $('allowlist-cmds').value = cmds.join('\n');
+});
+$('btn-allowlist-clear').addEventListener('click', async () => {
+  if (!confirm('确定清空所有允许的指令？')) return;
+  await window.pywebview.api.save_allowed_commands_api([]);
+  $('allowlist-cmds').value = '';
+});
 
 // Tab switching
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -722,7 +766,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-function openSettings() {
+async function openSettings() {
   const cfg = state.config;
   $('tavily-key').value = cfg.tavily_api_key || '';
   $('cmd-safety').value = cfg.command_safety || 'confirm';
@@ -733,6 +777,9 @@ function openSettings() {
   $('ui-theme').value = cfg.theme || 'dark';
   $('ui-fontsize').value = String(cfg.font_size || 14);
   renderModelConfigList();
+  // load allowlist
+  const cmds = await window.pywebview.api.get_allowed_commands();
+  $('allowlist-cmds').value = cmds.join('\n');
   $('settings-overlay').classList.remove('hidden');
 }
 

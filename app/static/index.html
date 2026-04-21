@@ -82,6 +82,7 @@
       <button class="tab-btn active" data-tab="models">模型配置</button>
       <button class="tab-btn" data-tab="tools">工具设置</button>
       <button class="tab-btn" data-tab="vision">图片理解</button>
+      <button class="tab-btn" data-tab="allowlist">允许的指令</button>
       <button class="tab-btn" data-tab="ui">界面设置</button>
     </div>
     <div class="modal-body">
@@ -125,6 +126,15 @@
         <label>模型名<input type="text" id="vision-model" placeholder="qwen-vl-max"></label>
         <p class="hint">常用模型：qwen-vl-max / qwen-vl-plus / gpt-4o / glm-4v</p>
       </div>
+      <!-- 允许的指令 -->
+      <div class="tab-panel" id="tab-allowlist">
+        <p class="hint">以下命令在模型调用时将跳过确认直接执行。每行一条。</p>
+        <textarea id="allowlist-cmds" rows="10" style="width:100%;font-family:monospace;font-size:12px"></textarea>
+        <div class="form-row" style="margin-top:8px">
+          <button id="btn-allowlist-save" class="btn-primary">保存</button>
+          <button id="btn-allowlist-clear" class="btn-danger">清空全部</button>
+        </div>
+      </div>
       <!-- 界面设置 -->
       <div class="tab-panel" id="tab-ui">
         <label>主题
@@ -160,6 +170,7 @@
     <pre id="confirm-detail"></pre>
     <div class="modal-footer">
       <button id="btn-confirm-no" class="btn-ghost">拒绝</button>
+      <button id="btn-confirm-always" class="btn-secondary">以后都允许</button>
       <button id="btn-confirm-yes" class="btn-primary">允许</button>
     </div>
   </div>

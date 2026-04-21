@@ -87,3 +87,41 @@ def get_active_model_config(config: dict) -> Optional[dict]:
             return mc
     configs = config.get("model_configs", [])
     return configs[0] if configs else None
+
+
+def get_allowed_commands_path() -> Path:
+    return get_app_data_dir() / "allowed_commands.json"
+
+
+def load_allowed_commands() -> list:
+    p = get_allowed_commands_path()
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def save_allowed_commands(commands: list) -> None:
+    with open(get_allowed_commands_path(), "w", encoding="utf-8") as f:
+        json.dump(commands, f, ensure_ascii=False, indent=2)
+
+
+def is_command_allowed(command: str) -> bool:
+    return command.strip() in load_allowed_commands()
+
+
+def add_allowed_command(command: str) -> None:
+    cmds = load_allowed_commands()
+    cmd = command.strip()
+    if cmd and cmd not in cmds:
+        cmds.append(cmd)
+        save_allowed_commands(cmds)
+    name = config.get("active_model_config")
+    for mc in config.get("model_configs", []):
+        if mc["name"] == name:
+            return mc
+    configs = config.get("model_configs", [])
+    return configs[0] if configs else None

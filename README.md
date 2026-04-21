@@ -23,10 +23,6 @@ English | [中文](./README.zh.md)
 - **Conversation management** — Persistent JSON storage, drag-sort, rename, export to Markdown
 - **Multi-agent** — Spawn subagents for parallel tasks
 
-## Screenshots
-
-> Coming soon
-
 ## Requirements
 
 - Windows 10/11 with [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (usually pre-installed on Win11)
@@ -38,7 +34,7 @@ English | [中文](./README.zh.md)
 ### Run from source
 
 ```bash
-git clone https://github.com/your-username/quick-model.git
+git clone https://github.com/SolitudeZY/QuickModel.git
 cd quick-model
 
 pip install -r requirements.txt
@@ -48,7 +44,7 @@ python main.py
 
 ### Download pre-built .exe
 
-Download `QuickModel.exe` from [Releases](https://github.com/your-username/quick-model/releases) and run directly. No installation needed.
+Download `QuickModel.exe` from [Releases](https://github.com/SolitudeZY/QuickModel/releases) and run directly. No installation needed.
 
 ## Build
 

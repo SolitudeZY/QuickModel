@@ -4,7 +4,7 @@ import webview
 from pathlib import Path
 from typing import Optional
 
-from app.config import load_config, save_config, get_active_model_config
+from app.config import load_config, save_config, get_active_model_config, load_allowed_commands, save_allowed_commands, is_command_allowed, add_allowed_command
 from app.conversation import (
     new_conversation, save_conversation, load_conversation,
     delete_conversation, rename_conversation, list_conversations,
@@ -324,6 +324,11 @@ class API:
         self._js(f'Chat.showToolResult({json.dumps(tool_name)}, {json.dumps(result)})')
 
     def _on_confirm(self, tool_name: str, args: dict) -> bool:
+        # Check allowlist for run_command
+        if tool_name == "run_command":
+            cmd = args.get("command", "").strip()
+            if is_command_allowed(cmd):
+                return True
         self._confirm_event.clear()
         self._js(f'Chat.showConfirmDialog({json.dumps(tool_name)}, {json.dumps(args)})')
         self._confirm_event.wait()
@@ -332,6 +337,17 @@ class API:
     def confirm_tool(self, approved: bool) -> None:
         self._confirm_result = approved
         self._confirm_event.set()
+
+    def confirm_tool_always(self, command: str) -> None:
+        add_allowed_command(command)
+        self._confirm_result = True
+        self._confirm_event.set()
+
+    def get_allowed_commands(self) -> list:
+        return load_allowed_commands()
+
+    def save_allowed_commands_api(self, commands: list) -> None:
+        save_allowed_commands(commands)
 
     def _on_done(self, conv: dict, updated_messages: list):
         conv['messages'] = updated_messages

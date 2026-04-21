@@ -243,7 +243,9 @@ class Agent:
         all_messages = [{"role": "system", "content": self.system_prompt}] + messages
 
         try:
-            while not self._stop_flag.is_set():
+            max_rounds = 50
+            round_count = 0
+            while not self._stop_flag.is_set() and round_count < max_rounds:
                 # 注入后台任务完成通知
                 notes = self._bg.drain_notifications()
                 for note in notes:
@@ -304,6 +306,7 @@ class Agent:
                                     current_tool_calls[idx]["function"]["arguments"] += tc.function.arguments
 
                 tool_calls_accumulated = list(current_tool_calls.values())
+                round_count += 1
 
                 assistant_msg: dict = {"role": "assistant", "content": assistant_content}
                 if tool_calls_accumulated:
