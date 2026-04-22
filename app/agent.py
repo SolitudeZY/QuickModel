@@ -360,12 +360,12 @@ class Agent:
                                 result = f"工具 {tool_name} 已被禁用"
                             elif self.command_safety == "confirm":
                                 allowed = on_confirm(tool_name, args)
-                                result = (dispatch(tool_name, args, self.tavily_key, self.command_timeout)
+                                result = (dispatch(tool_name, args, self.tavily_key, self.command_timeout, self._stop_flag)
                                           if allowed else f"用户拒绝执行工具：{tool_name}")
                             else:
-                                result = dispatch(tool_name, args, self.tavily_key, self.command_timeout)
+                                result = dispatch(tool_name, args, self.tavily_key, self.command_timeout, self._stop_flag)
                         else:
-                            result = dispatch(tool_name, args, self.tavily_key, self.command_timeout)
+                            result = dispatch(tool_name, args, self.tavily_key, self.command_timeout, self._stop_flag)
 
                     if tool_name == "todo_write":
                         used_todo = True
