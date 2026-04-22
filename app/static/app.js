@@ -868,9 +868,44 @@ function escapeHtml(str) {
 
 function scrollToBottom() {
   const area = $('chat-area');
-  const threshold = 80; // px from bottom — counts as "at bottom"
+  const threshold = 80;
   const distFromBottom = area.scrollHeight - area.scrollTop - area.clientHeight;
   if (distFromBottom <= threshold) {
     area.scrollTop = area.scrollHeight;
   }
 }
+
+// ── Chat nav buttons ──────────────────────────────────────────────
+$('btn-nav-bottom').addEventListener('click', () => {
+  const area = $('chat-area');
+  area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
+});
+
+$('btn-nav-prev').addEventListener('click', () => {
+  const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user, .bubble-assistant'));
+  if (!bubbles.length) return;
+  const area = $('chat-area');
+  const areaTop = area.getBoundingClientRect().top;
+  // find last bubble whose top is above current viewport
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const rect = bubbles[i].getBoundingClientRect();
+    if (rect.top < areaTop - 10) {
+      bubbles[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+  }
+});
+
+$('btn-nav-next').addEventListener('click', () => {
+  const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user, .bubble-assistant'));
+  if (!bubbles.length) return;
+  const area = $('chat-area');
+  const areaTop = area.getBoundingClientRect().top;
+  for (let i = 0; i < bubbles.length; i++) {
+    const rect = bubbles[i].getBoundingClientRect();
+    if (rect.top > areaTop + 10) {
+      bubbles[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+  }
+});

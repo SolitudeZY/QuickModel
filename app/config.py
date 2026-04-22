@@ -111,7 +111,12 @@ def save_allowed_commands(commands: list) -> None:
 
 
 def is_command_allowed(command: str) -> bool:
-    return command.strip() in load_allowed_commands()
+    import fnmatch
+    cmd = command.strip()
+    for pattern in load_allowed_commands():
+        if fnmatch.fnmatch(cmd, pattern) or cmd == pattern:
+            return True
+    return False
 
 
 def add_allowed_command(command: str) -> None:
@@ -120,9 +125,3 @@ def add_allowed_command(command: str) -> None:
     if cmd and cmd not in cmds:
         cmds.append(cmd)
         save_allowed_commands(cmds)
-    name = config.get("active_model_config")
-    for mc in config.get("model_configs", []):
-        if mc["name"] == name:
-            return mc
-    configs = config.get("model_configs", [])
-    return configs[0] if configs else None

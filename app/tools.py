@@ -108,6 +108,8 @@ def list_directory(path: str) -> str:
 
 
 def run_command(command: str, timeout: int = 30, stop_flag=None) -> str:
+    import time, threading
+
     try:
         proc = subprocess.Popen(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
@@ -115,20 +117,36 @@ def run_command(command: str, timeout: int = 30, stop_flag=None) -> str:
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
         )
-        import time
+
+        result_holder = {}
+
+        def _communicate():
+            try:
+                out, err = proc.communicate()
+                result_holder['stdout'] = out
+                result_holder['stderr'] = err
+            except Exception as e:
+                result_holder['error'] = str(e)
+
+        t = threading.Thread(target=_communicate, daemon=True)
+        t.start()
+
         elapsed = 0
         interval = 0.2
-        while proc.poll() is None:
+        while t.is_alive():
             if stop_flag and stop_flag.is_set():
                 proc.kill()
+                t.join(2)
                 return "用户已停止命令执行"
             if elapsed >= timeout:
                 proc.kill()
+                t.join(2)
                 return f"错误：命令超时（{timeout}s）"
             time.sleep(interval)
             elapsed += interval
 
-        stdout_b, stderr_b = proc.communicate()
+        if 'error' in result_holder:
+            return f"执行失败：{result_holder['error']}"
 
         def _decode(b: bytes) -> str:
             if not b:
@@ -141,8 +159,8 @@ def run_command(command: str, timeout: int = 30, stop_flag=None) -> str:
                     continue
             return b.decode("utf-8", errors="replace")
 
-        stdout = _decode(stdout_b)
-        stderr = _decode(stderr_b)
+        stdout = _decode(result_holder.get('stdout', b''))
+        stderr = _decode(result_holder.get('stderr', b''))
         output = stdout
         if stderr:
             output += f"\n[stderr]\n{stderr}"
