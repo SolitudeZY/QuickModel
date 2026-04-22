@@ -487,6 +487,12 @@ document.addEventListener('click', (e) => {
   if (slashMenuVisible() && !slashMenu.contains(e.target) && e.target !== $('btn-slash')) {
     slashMenuHide();
   }
+  // Open all external links in system browser
+  const a = e.target.closest('a[href]');
+  if (a && a.href && a.href.startsWith('http')) {
+    e.preventDefault();
+    window.pywebview.api.open_url(a.href);
+  }
 });
 btnSend.addEventListener('click', sendMessage);
 btnStop.addEventListener('click', () => window.pywebview.api.stop_generation());

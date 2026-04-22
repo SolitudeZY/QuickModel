@@ -110,9 +110,9 @@ def list_directory(path: str) -> str:
 def run_command(command: str, timeout: int = 30) -> str:
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             timeout=timeout,
         )
         # Windows 系统命令输出为本地编码（GBK/CP936），先尝试本地编码，再 fallback UTF-8
@@ -132,9 +132,11 @@ def run_command(command: str, timeout: int = 30) -> str:
         output = stdout
         if stderr:
             output += f"\n[stderr]\n{stderr}"
+        if result.returncode != 0:
+            output += f"\n[退出码: {result.returncode}]"
         return output.strip() or f"（命令执行完毕，退出码 {result.returncode}，无输出）"
     except subprocess.TimeoutExpired:
-        return f"错误：命令超时（{timeout}s）"
+        return f"错误：命令超时（{timeout}s）— 提示：Windows 请使用 cmd 语法，避免使用 && 或 $VAR，可改用多条命令分开执行"
     except Exception as e:
         return f"执行失败：{e}"
 
@@ -220,7 +222,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "run_command",
-            "description": "在系统 shell 中执行命令，返回输出结果",
+            "description": "在 PowerShell 中执行命令，返回输出结果。支持 PowerShell 语法，包括 &&、$ENV:VAR、管道等。",
             "parameters": {
                 "type": "object",
                 "properties": {

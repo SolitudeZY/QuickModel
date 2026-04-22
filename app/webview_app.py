@@ -1,5 +1,6 @@
 import json
 import threading
+import webbrowser
 import webview
 from pathlib import Path
 from typing import Optional
@@ -94,6 +95,9 @@ class API:
 
     def set_thinking(self, enabled: bool) -> None:
         self._thinking = bool(enabled)
+
+    def open_url(self, url: str) -> None:
+        webbrowser.open(url)
 
     # ── Skills ────────────────────────────────────────────────────
     def list_skills(self) -> list:
