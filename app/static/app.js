@@ -771,6 +771,7 @@ async function openSettings() {
   $('tavily-key').value = cfg.tavily_api_key || '';
   $('cmd-safety').value = cfg.command_safety || 'confirm';
   $('cmd-timeout').value = cfg.command_timeout || 30;
+  $('max-rounds').value = cfg.max_rounds || 50;
   $('vision-key').value = cfg.vision_api_key || '';
   $('vision-url').value = cfg.vision_base_url || '';
   $('vision-model').value = cfg.vision_model || '';
@@ -788,6 +789,7 @@ async function saveSettings() {
   state.config.tavily_api_key = $('tavily-key').value.trim();
   state.config.command_safety = $('cmd-safety').value;
   state.config.command_timeout = parseInt($('cmd-timeout').value) || 30;
+  state.config.max_rounds = parseInt($('max-rounds').value) || 50;
   state.config.vision_api_key = $('vision-key').value.trim();
   state.config.vision_base_url = $('vision-url').value.trim();
   state.config.vision_model = $('vision-model').value.trim();

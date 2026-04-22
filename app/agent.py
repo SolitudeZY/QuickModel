@@ -37,6 +37,7 @@ class Agent:
         task_manager: Optional[TaskManager] = None,
         bg_manager: Optional[BackgroundManager] = None,
         thinking: bool = False,
+        max_rounds: int = 50,
     ):
         self.model = model
         self.system_prompt = system_prompt
@@ -44,6 +45,7 @@ class Agent:
         self.command_safety = command_safety
         self.command_timeout = command_timeout
         self.thinking = thinking
+        self.max_rounds = max_rounds
         self._model_configs: list = []
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._base_url = (base_url or "").rstrip("/")
@@ -243,7 +245,7 @@ class Agent:
         all_messages = [{"role": "system", "content": self.system_prompt}] + messages
 
         try:
-            max_rounds = 50
+            max_rounds = self.max_rounds
             round_count = 0
             while not self._stop_flag.is_set() and round_count < max_rounds:
                 # 注入后台任务完成通知

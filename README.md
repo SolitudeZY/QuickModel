@@ -14,7 +14,8 @@ English | [中文](./README.zh.md)
 - **Tool calling** — File read/write, shell commands, web search (Tavily), directory listing
 - **Thinking mode** — Extended reasoning support for DeepSeek V3.2, OpenAI o-series, and Anthropic Claude
 - **Image understanding** — Drag & drop images, powered by Qwen-VL or any vision API
-- **Agent loop** — Multi-turn tool calling with sliding window context management
+- **Agent loop** — Multi-turn tool calling with configurable max rounds, sliding window context management
+- **Command allowlist** — Whitelist trusted shell commands to skip confirmation dialogs
 - **Context compression** — Auto-compact at 80k tokens, manual `/compact` command
 - **Todo & Task manager** — Model-maintained checklist and persistent task tracking
 - **Skill system** — Save and reuse custom prompt templates

@@ -51,6 +51,7 @@ DEFAULT_CONFIG = {
     "tavily_api_key": "",
     "command_safety": "confirm",   # confirm | auto | disabled
     "command_timeout": 30,
+    "max_rounds": 50,
     "theme": "dark",               # dark | light | system
     "font_size": 13,
     "sidebar_width": 220,
