@@ -107,15 +107,29 @@ def list_directory(path: str) -> str:
         return f"错误：无权限访问 — {path}"
 
 
-def run_command(command: str, timeout: int = 30) -> str:
+def run_command(command: str, timeout: int = 30, stop_flag=None) -> str:
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
-            timeout=timeout,
         )
-        # Windows 系统命令输出为本地编码（GBK/CP936），先尝试本地编码，再 fallback UTF-8
+        import time
+        elapsed = 0
+        interval = 0.2
+        while proc.poll() is None:
+            if stop_flag and stop_flag.is_set():
+                proc.kill()
+                return "用户已停止命令执行"
+            if elapsed >= timeout:
+                proc.kill()
+                return f"错误：命令超时（{timeout}s）"
+            time.sleep(interval)
+            elapsed += interval
+
+        stdout_b, stderr_b = proc.communicate()
+
         def _decode(b: bytes) -> str:
             if not b:
                 return ""
@@ -127,16 +141,14 @@ def run_command(command: str, timeout: int = 30) -> str:
                     continue
             return b.decode("utf-8", errors="replace")
 
-        stdout = _decode(result.stdout)
-        stderr = _decode(result.stderr)
+        stdout = _decode(stdout_b)
+        stderr = _decode(stderr_b)
         output = stdout
         if stderr:
             output += f"\n[stderr]\n{stderr}"
-        if result.returncode != 0:
-            output += f"\n[退出码: {result.returncode}]"
-        return output.strip() or f"（命令执行完毕，退出码 {result.returncode}，无输出）"
-    except subprocess.TimeoutExpired:
-        return f"错误：命令超时（{timeout}s）— 提示：Windows 请使用 cmd 语法，避免使用 && 或 $VAR，可改用多条命令分开执行"
+        if proc.returncode != 0:
+            output += f"\n[退出码: {proc.returncode}]"
+        return output.strip() or f"（命令执行完毕，退出码 {proc.returncode}，无输出）"
     except Exception as e:
         return f"执行失败：{e}"
 
@@ -254,7 +266,7 @@ TOOLS_SCHEMA = [
 CONFIRM_REQUIRED = {"run_command", "write_file"}
 
 
-def dispatch(tool_name: str, args: dict, tavily_key: str = "", timeout: int = 30) -> str:
+def dispatch(tool_name: str, args: dict, tavily_key: str = "", timeout: int = 30, stop_flag=None) -> str:
     """执行工具调用，返回字符串结果。"""
     if tool_name == "read_file":
         return read_file(args.get("path", ""))
@@ -263,7 +275,7 @@ def dispatch(tool_name: str, args: dict, tavily_key: str = "", timeout: int = 30
     elif tool_name == "web_search":
         return web_search(args.get("query", ""), args.get("max_results", 5), api_key=tavily_key)
     elif tool_name == "run_command":
-        return run_command(args.get("command", ""), args.get("timeout", timeout))
+        return run_command(args.get("command", ""), args.get("timeout", timeout), stop_flag=stop_flag)
     elif tool_name == "write_file":
         return write_file(args.get("path", ""), args.get("content", ""))
     else:
