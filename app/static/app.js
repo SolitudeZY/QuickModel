@@ -251,9 +251,46 @@ function loadHistory(messages) {
 function addUserBubble(text) {
   const div = document.createElement('div');
   div.className = 'bubble bubble-user';
-  div.innerHTML = `<div class="bubble-label">You</div><div class="bubble-content">${escapeHtml(text).replace(/\n/g,'<br>')}</div>`;
+  const collapsible = document.createElement('div');
+  collapsible.className = 'bubble-collapsible';
+  collapsible.innerHTML = `<div class="bubble-label">You</div><div class="bubble-content">${buildUserContent(text)}</div>`;
+  div.appendChild(collapsible);
   chatMessages.appendChild(div);
+  // Load image thumbnails async
+  collapsible.querySelectorAll('img.chat-img-thumb[data-filename]').forEach(async img => {
+    const dataUrl = await window.pywebview.api.get_image_data(img.dataset.filename);
+    if (dataUrl) img.src = dataUrl;
+  });
+  // Check if content exceeds collapse threshold after render
+  requestAnimationFrame(() => {
+    if (collapsible.scrollHeight > 130) {
+      collapsible.classList.add('needs-collapse');
+      const btn = document.createElement('button');
+      btn.className = 'bubble-toggle-btn';
+      btn.textContent = '展开 ▼';
+      btn.addEventListener('click', () => {
+        const expanded = collapsible.classList.toggle('expanded');
+        btn.textContent = expanded ? '收起 ▲' : '展开 ▼';
+      });
+      div.appendChild(btn);
+    } else {
+      collapsible.classList.add('expanded');
+    }
+  });
   return div;
+}
+
+function buildUserContent(text) {
+  // Parts are joined by \n\n in Python; each image block is "[图片: name]\ndescription"
+  // Split by double newline, render image blocks as thumbnails (hide verbose description)
+  return text.split(/\n\n/).map(seg => {
+    const m = seg.match(/^\[图片: ([^\]]+)\]([\s\S]*)$/);
+    if (m) {
+      const fname = m[1];
+      return `<img class="chat-img-thumb" data-filename="${escapeHtml(fname)}" src="" alt="${escapeHtml(fname)}" onclick="openLightbox(this.src)">`;
+    }
+    return escapeHtml(seg).replace(/\n/g, '<br>');
+  }).join('<br>');
 }
 
 function addAssistantBubble(content) {
@@ -466,6 +503,19 @@ function setRunning(running) {
   btnSend.disabled = running;
   btnStop.disabled = !running;
 }
+
+// Paste image from clipboard into input
+msgInput.addEventListener('paste', async e => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (file) await addFileChip(file);
+    }
+  }
+});
 
 msgInput.addEventListener('keydown', e => {
   if (slashMenuVisible()) {
@@ -876,21 +926,34 @@ function scrollToBottom() {
 }
 
 // ── Chat nav buttons ──────────────────────────────────────────────
-$('btn-nav-bottom').addEventListener('click', () => {
+function smoothScrollTo(targetScrollTop, duration = 320) {
   const area = $('chat-area');
-  area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
+  const start = area.scrollTop;
+  const delta = targetScrollTop - start;
+  if (Math.abs(delta) < 2) return;
+  const startTime = performance.now();
+  function step(now) {
+    const t = Math.min((now - startTime) / duration, 1);
+    const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2;
+    area.scrollTop = start + delta * ease;
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+$('btn-nav-bottom').addEventListener('click', () => {
+  smoothScrollTo($('chat-area').scrollHeight);
 });
 
 $('btn-nav-prev').addEventListener('click', () => {
   const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user, .bubble-assistant'));
   if (!bubbles.length) return;
   const area = $('chat-area');
-  const areaTop = area.getBoundingClientRect().top;
-  // find last bubble whose top is above current viewport
+  const areaScrollTop = area.scrollTop;
   for (let i = bubbles.length - 1; i >= 0; i--) {
-    const rect = bubbles[i].getBoundingClientRect();
-    if (rect.top < areaTop - 10) {
-      bubbles[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const bubbleTop = bubbles[i].offsetTop - chatMessages.offsetTop;
+    if (bubbleTop < areaScrollTop - 10) {
+      smoothScrollTo(bubbleTop - 8);
       return;
     }
   }
@@ -900,12 +963,27 @@ $('btn-nav-next').addEventListener('click', () => {
   const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user, .bubble-assistant'));
   if (!bubbles.length) return;
   const area = $('chat-area');
-  const areaTop = area.getBoundingClientRect().top;
+  const areaScrollTop = area.scrollTop;
   for (let i = 0; i < bubbles.length; i++) {
-    const rect = bubbles[i].getBoundingClientRect();
-    if (rect.top > areaTop + 10) {
-      bubbles[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const bubbleTop = bubbles[i].offsetTop - chatMessages.offsetTop;
+    if (bubbleTop > areaScrollTop + 10) {
+      smoothScrollTo(bubbleTop - 8);
       return;
     }
   }
 });
+
+// ── Image lightbox ────────────────────────────────────────────────
+function openLightbox(src) {
+  if (!src) return;
+  $('lightbox-img').src = src;
+  $('lightbox-overlay').classList.remove('hidden');
+}
+function closeLightbox() {
+  $('lightbox-overlay').classList.add('hidden');
+  $('lightbox-img').src = '';
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLightbox();
+});
+$('lightbox-img').addEventListener('click', e => e.stopPropagation());

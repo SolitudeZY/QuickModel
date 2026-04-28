@@ -23,7 +23,21 @@ CONFIG_PATH = get_app_data_dir() / "config.json"
 
 DEFAULT_MODEL_CONFIGS = [
     {
-        "name": "DeepSeek 官方",
+        "name": "DeepSeek V4 Pro",
+        "api_key": "",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-pro",
+        "system_prompt": "You are a helpful assistant.",
+    },
+    {
+        "name": "DeepSeek V4 Flash",
+        "api_key": "",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-v4-flash",
+        "system_prompt": "You are a helpful assistant.",
+    },
+    {
+        "name": "DeepSeek V3.2",
         "api_key": "",
         "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",

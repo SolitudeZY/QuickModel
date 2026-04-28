@@ -13,7 +13,14 @@
       "Bash(D:/miniconda/envs/ai_api/python.exe main.py)",
       "Bash(D:/miniconda/envs/ai_api/python.exe -c \"from app.webview_app import API, get_html_path; print\\('OK'\\)\")",
       "Bash(D:/miniconda/envs/ai_api/python.exe -c ':*)",
-      "Bash(D:/miniconda/envs/ai_api/python.exe -c \"from app.agent import Agent; from app.webview_app import API; print\\('OK'\\)\")"
+      "Bash(D:/miniconda/envs/ai_api/python.exe -c \"from app.agent import Agent; from app.webview_app import API; print\\('OK'\\)\")",
+      "WebFetch(domain:api-docs.deepseek.com)",
+      "WebFetch(domain:apidog.com)",
+      "WebFetch(domain:www.cometapi.com)",
+      "WebFetch(domain:chat-deep.ai)",
+      "Bash(python3 -c ':*)",
+      "Bash(python:*)",
+      "Bash(python3:*)"
     ]
   }
 }

@@ -14,6 +14,10 @@ from app.skills import skill_list_str, skill_read, memory_read, memory_write
 
 # Token threshold for auto-compact (approx)
 AUTO_COMPACT_THRESHOLD = 80_000
+# V4 models have 1M context — compact at 800k to leave headroom
+AUTO_COMPACT_THRESHOLD_V4 = 800_000
+
+V4_MODELS = {"deepseek-v4-pro", "deepseek-v4-flash"}
 
 
 class Agent:
@@ -86,7 +90,9 @@ class Agent:
 
         if self._is_reasoner():
             if provider == "deepseek":
-                # V3.2+ supports thinking + tool calling
+                # V3.2+ / V4: thinking mode + tool calling
+                # reasoning_effort is a top-level param, thinking type goes in extra_body
+                kwargs["reasoning_effort"] = "high"
                 kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
                 kwargs["tools"] = self._all_tools()
                 kwargs["tool_choice"] = "auto"
@@ -247,6 +253,7 @@ class Agent:
         try:
             max_rounds = self.max_rounds
             round_count = 0
+            threshold = AUTO_COMPACT_THRESHOLD_V4 if self.model in V4_MODELS else AUTO_COMPACT_THRESHOLD
             while not self._stop_flag.is_set() and round_count < max_rounds:
                 # 注入后台任务完成通知
                 notes = self._bg.drain_notifications()
@@ -260,14 +267,23 @@ class Agent:
                 microcompact(all_messages)
 
                 # auto_compact：token 超限时压缩
-                if estimate_tokens(all_messages) > AUTO_COMPACT_THRESHOLD:
+                if estimate_tokens(all_messages) > threshold:
                     all_messages = auto_compact(all_messages, self._client, self.model)
 
                 # 推送上下文用量
                 if on_context_update:
-                    on_context_update(estimate_tokens(all_messages), AUTO_COMPACT_THRESHOLD)
+                    on_context_update(estimate_tokens(all_messages), threshold)
 
                 full_messages = self._apply_window(all_messages)
+
+                # DeepSeek thinking mode: all assistant messages must carry reasoning_content.
+                # Patch any that are missing it (old history, compact summaries, etc.)
+                if self._is_reasoner() and self._provider() == "deepseek":
+                    full_messages = [
+                        {**msg, "reasoning_content": msg.get("reasoning_content", "")}
+                        if msg.get("role") == "assistant" else msg
+                        for msg in full_messages
+                    ]
 
                 tool_calls_accumulated = []
                 assistant_content = ""
@@ -311,6 +327,10 @@ class Agent:
                 round_count += 1
 
                 assistant_msg: dict = {"role": "assistant", "content": assistant_content}
+                # DeepSeek thinking mode: reasoning_content must ALWAYS be present on every
+                # assistant message when thinking is enabled — even if empty this round.
+                if self._is_reasoner() and provider == "deepseek":
+                    assistant_msg["reasoning_content"] = thinking_content
                 if tool_calls_accumulated:
                     assistant_msg["tool_calls"] = tool_calls_accumulated
                 all_messages.append(assistant_msg)

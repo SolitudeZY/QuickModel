@@ -161,6 +161,18 @@ class API:
         dest.write_bytes(base64.b64decode(base64_content))
         return str(dest)
 
+    def get_image_data(self, filename: str) -> str:
+        """Return base64 data URL for an uploaded image (by filename only)."""
+        import base64 as _b64
+        from app.config import get_app_data_dir
+        path = get_app_data_dir() / 'uploads' / filename
+        if not path.exists():
+            return ''
+        ext = path.suffix.lower().lstrip('.')
+        mime = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                'gif': 'image/gif', 'webp': 'image/webp', 'bmp': 'image/bmp'}.get(ext, 'image/png')
+        return f'data:{mime};base64,{_b64.b64encode(path.read_bytes()).decode()}'
+
     def read_file_content(self, path: str) -> str:
         try:
             return _read_file(path)
