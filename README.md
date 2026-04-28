@@ -12,16 +12,18 @@ English | [中文](./README.zh.md)
 
 - **Multi-vendor LLM** — Works with any OpenAI-compatible API: DeepSeek, OpenAI, Qwen, Ollama, and more
 - **Tool calling** — File read/write, shell commands, web search (Tavily), directory listing
-- **Thinking mode** — Extended reasoning support for DeepSeek V3.2, OpenAI o-series, and Anthropic Claude
-- **Image understanding** — Drag & drop images, powered by Qwen-VL or any vision API
+- **Thinking mode** — Extended reasoning support for DeepSeek V4/V3.2, OpenAI o-series, and Anthropic Claude
+- **Image understanding** — Drag & drop or paste images (Ctrl+V); thumbnails shown in chat history with click-to-enlarge lightbox; powered by Qwen-VL or any vision API
 - **Agent loop** — Multi-turn tool calling with configurable max rounds, sliding window context management
 - **Command allowlist** — Whitelist trusted shell commands to skip confirmation dialogs
-- **Context compression** — Auto-compact at 80k tokens, manual `/compact` command
+- **Context compression** — Auto-compact at 80k tokens (800k for DeepSeek V4 1M-context models), manual `/compact` command
 - **Todo & Task manager** — Model-maintained checklist and persistent task tracking
 - **Skill system** — Save and reuse custom prompt templates
 - **Memory system** — Persistent memory files injected on new conversations
 - **Markdown & LaTeX** — Full rendering with marked.js and KaTeX (offline, no CDN)
 - **Conversation management** — Persistent JSON storage, drag-sort, rename, export to Markdown
+- **Collapsible user bubbles** — Long inputs auto-collapse with expand/collapse toggle
+- **Smooth chat navigation** — ↑↓ buttons scroll with easeInOutCubic animation
 - **Multi-agent** — Spawn subagents for parallel tasks
 
 ## Requirements
