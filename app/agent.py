@@ -42,6 +42,7 @@ class Agent:
         bg_manager: Optional[BackgroundManager] = None,
         thinking: bool = False,
         max_rounds: int = 50,
+        search_enabled: bool = True,
     ):
         self.model = model
         self.system_prompt = system_prompt
@@ -50,6 +51,7 @@ class Agent:
         self.command_timeout = command_timeout
         self.thinking = thinking
         self.max_rounds = max_rounds
+        self.search_enabled = search_enabled
         self._model_configs: list = []
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._base_url = (base_url or "").rstrip("/")
@@ -122,7 +124,10 @@ class Agent:
         return self._todo
 
     def _all_tools(self) -> list:
-        return TOOLS_SCHEMA + ADVANCED_TOOLS_SCHEMA
+        tools = TOOLS_SCHEMA + ADVANCED_TOOLS_SCHEMA
+        if not self.search_enabled:
+            tools = [t for t in tools if t.get("function", {}).get("name") != "web_search"]
+        return tools
 
     def _dispatch_advanced(self, tool_name: str, args: dict) -> Optional[str]:
         """Handle advanced tools. Returns None if not an advanced tool."""
@@ -263,6 +268,15 @@ class Agent:
                         "content": f"<bg_notification>后台任务 {note['task_id']} 已完成：{note['result']}</bg_notification>",
                     })
 
+                # 注入团队成员发给 lead 的消息
+                from app.team import BUS as _BUS
+                inbox_msgs = _BUS.read_inbox("lead")
+                for im in inbox_msgs:
+                    all_messages.append({
+                        "role": "user",
+                        "content": f"<team_inbox>来自 {im.get('from','?')} 的消息：{im.get('content','')}</team_inbox>",
+                    })
+
                 # microcompact：清理旧 tool result
                 microcompact(all_messages)
 
@@ -281,6 +295,14 @@ class Agent:
                 if self._is_reasoner() and self._provider() == "deepseek":
                     full_messages = [
                         {**msg, "reasoning_content": msg.get("reasoning_content") or ""}
+                        if msg.get("role") == "assistant" else msg
+                        for msg in full_messages
+                    ]
+                # Non-thinking mode: strip reasoning_content from history to avoid DeepSeek
+                # treating the session as a thinking-mode conversation (causes 400 error).
+                elif not self._is_reasoner() and self._provider() == "deepseek":
+                    full_messages = [
+                        {k: v for k, v in msg.items() if k != "reasoning_content"}
                         if msg.get("role") == "assistant" else msg
                         for msg in full_messages
                     ]

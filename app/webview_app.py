@@ -15,7 +15,7 @@ from app.agent import Agent
 from app.tools import read_file as _read_file
 from app.vision import is_image, describe_image
 from app.advanced_tools import TodoManager, TaskManager, BackgroundManager
-from app.team import TEAM
+from app.team import TEAM, WORKTREES
 from app.skills import skill_list, skill_save, skill_delete, skill_read, memory_list, memory_read, memory_write
 
 
@@ -44,7 +44,10 @@ class API:
         self._todo = TodoManager()
         self._tasks = TaskManager()
         self._bg = BackgroundManager()
-        self._thinking = False  # thinking mode toggle
+        # Persist thinking/search state from config
+        self._thinking = bool(self._config.get("thinking", True))
+        self._search_mode = self._config.get("search_mode", "auto")    # "auto" | "manual"
+        self._search_enabled = bool(self._config.get("search_enabled", True))
         # Team notification callback — push teammate activity to UI
         TEAM.set_notification_cb(lambda msg: self._js(f'Chat.showTeamNotification({json.dumps(msg)})'))
 
@@ -95,6 +98,28 @@ class API:
 
     def set_thinking(self, enabled: bool) -> None:
         self._thinking = bool(enabled)
+        self._config["thinking"] = self._thinking
+        save_config(self._config)
+
+    def get_ui_state(self) -> dict:
+        """Return persistent UI toggle states for frontend init."""
+        return {
+            "thinking": self._thinking,
+            "search_mode": self._search_mode,
+            "search_enabled": self._search_enabled,
+        }
+
+    def set_search_mode(self, mode: str) -> None:
+        """mode: 'auto' | 'manual'"""
+        self._search_mode = mode
+        self._config["search_mode"] = mode
+        save_config(self._config)
+
+    def set_search_enabled(self, enabled: bool) -> None:
+        """Manual mode: toggle whether web_search tool is available."""
+        self._search_enabled = bool(enabled)
+        self._config["search_enabled"] = self._search_enabled
+        save_config(self._config)
 
     def open_url(self, url: str) -> None:
         webbrowser.open(url)
@@ -133,13 +158,19 @@ class API:
             parts.append(f"## {item['key']}\n{content}")
         return "\n\n".join(parts)
 
+    # ── Worktree ─────────────────────────────────────────────────
+    def get_worktrees(self) -> list:
+        """Return worktree list for frontend panel."""
+        idx = WORKTREES._load_index()
+        return idx.get("worktrees", [])
+
     def export_conversation(self, conv_id: str) -> None:
         conv = load_conversation(conv_id)
         if not conv:
             return
         md = export_conversation_md(conv)
         save_path = self._window.create_file_dialog(
-            webview.SAVE_DIALOG,
+            webview.FileDialog.SAVE,
             save_filename=f"{conv.get('title', 'conversation')}.md",
             file_types=('Markdown (*.md)', 'All files (*.*)')
         )
@@ -258,6 +289,7 @@ class API:
             task_manager=self._tasks,
             bg_manager=self._bg,
             thinking=self._thinking,
+            search_enabled=self._search_mode == "auto" or self._search_enabled,
         )
         self._agent._model_configs = self._config.get('model_configs', [])
         self._running = True
@@ -297,6 +329,7 @@ class API:
             task_manager=self._tasks,
             bg_manager=self._bg,
             thinking=self._thinking,
+            search_enabled=self._search_mode == "auto" or self._search_enabled,
         )
         self._agent._model_configs = self._config.get('model_configs', [])
         self._running = True

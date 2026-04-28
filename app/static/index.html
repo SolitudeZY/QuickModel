@@ -35,6 +35,15 @@
     <span id="conv-title"></span>
     <div id="toolbar-right">
       <button id="btn-thinking" class="btn-ghost" title="切换思考模式">💭 思考</button>
+      <!-- 联网搜索按钮 + 下拉 -->
+      <div id="search-btn-wrap">
+        <button id="btn-search" class="btn-ghost" title="联网搜索">🌐 联网</button>
+        <button id="btn-search-arrow" class="btn-ghost btn-search-arrow" title="搜索模式">▾</button>
+        <div id="search-dropdown" class="hidden">
+          <div class="search-dropdown-item" data-mode="auto">自动搜索（模型决定）</div>
+          <div class="search-dropdown-item" data-mode="manual">手动控制</div>
+        </div>
+      </div>
       <button id="btn-slash" class="btn-ghost" title="命令菜单">⌘ 命令</button>
       <button id="btn-export" class="btn-ghost">导出</button>
       <button id="btn-settings" class="btn-ghost">设置</button>
@@ -58,6 +67,14 @@
         <button id="btn-todo-close">✕</button>
       </div>
       <ul id="todo-list"></ul>
+    </div>
+    <!-- Worktree 面板 -->
+    <div id="wt-panel" class="hidden">
+      <div id="wt-header">
+        <span>Worktrees</span>
+        <button id="btn-wt-close">✕</button>
+      </div>
+      <ul id="wt-list"></ul>
     </div>
   </div>
 

@@ -305,12 +305,22 @@ def run_subagent(prompt: str, api_key: str, base_url: str, model: str,
 
     messages = [{"role": "user", "content": prompt}]
     system = "你是一个专注的子代理，负责完成指定的子任务并返回详细结果摘要。"
+    is_deepseek = "deepseek" in (base_url or "").lower()
 
     for _ in range(30):
+        # DeepSeek V4 requires reasoning_content on all assistant messages
+        # (V4 enables thinking by default). Patch before each API call.
+        send_messages = [{"role": "system", "content": system}]
+        for m in messages:
+            if m.get("role") == "assistant" and is_deepseek:
+                send_messages.append({**m, "reasoning_content": m.get("reasoning_content") or ""})
+            else:
+                send_messages.append(m)
+
         try:
             resp = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "system", "content": system}] + messages,
+                messages=send_messages,
                 tools=sub_tools,
                 tool_choice="auto",
             )
@@ -323,8 +333,8 @@ def run_subagent(prompt: str, api_key: str, base_url: str, model: str,
         if not msg.tool_calls:
             return msg.content or "(子代理无返回)"
 
-        # Append assistant message with tool_calls
-        messages.append({
+        # Append assistant message with tool_calls + reasoning_content
+        asst = {
             "role": "assistant",
             "content": msg.content or "",
             "tool_calls": [
@@ -332,7 +342,11 @@ def run_subagent(prompt: str, api_key: str, base_url: str, model: str,
                  "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                 for tc in msg.tool_calls
             ],
-        })
+        }
+        rc = getattr(msg, "reasoning_content", None)
+        if rc:
+            asst["reasoning_content"] = rc
+        messages.append(asst)
         # Execute tools and append results
         for tc in msg.tool_calls:
             try:

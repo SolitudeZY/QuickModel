@@ -206,6 +206,7 @@ class TeammateManager:
         )
         messages = [{"role": "user", "content": prompt}]
         tools = self._teammate_tools()
+        is_deepseek = "deepseek" in (base_url or "").lower()
 
         while True:
             # WORK PHASE
@@ -217,9 +218,20 @@ class TeammateManager:
                         self._notify(f"[{name}] 已关闭")
                         return
                     messages.append({"role": "user", "content": json.dumps(msg, ensure_ascii=False)})
+
+                # DeepSeek V4 requires reasoning_content on all assistant messages
+                # when thinking mode is active (V4 enables it by default).
+                # Patch: ensure every assistant message has reasoning_content.
+                send_messages = [{"role": "system", "content": sys_prompt}]
+                for m in messages:
+                    if m.get("role") == "assistant" and is_deepseek:
+                        send_messages.append({**m, "reasoning_content": m.get("reasoning_content") or ""})
+                    else:
+                        send_messages.append(m)
+
                 try:
                     resp = client.chat.completions.create(
-                        model=model, messages=[{"role": "system", "content": sys_prompt}] + messages,
+                        model=model, messages=send_messages,
                         tools=tools, tool_choice="auto",
                     )
                 except Exception as e:
@@ -227,6 +239,10 @@ class TeammateManager:
                     self._notify(f"[{name}] API 错误：{e}")
                     return
                 assistant_msg = {"role": "assistant", "content": resp.choices[0].message.content or ""}
+                # DeepSeek V4 may return reasoning_content even without explicit thinking mode
+                rc = getattr(resp.choices[0].message, "reasoning_content", None)
+                if rc:
+                    assistant_msg["reasoning_content"] = rc
                 tcs = resp.choices[0].message.tool_calls or []
                 if tcs:
                     assistant_msg["tool_calls"] = [

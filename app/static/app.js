@@ -92,6 +92,10 @@ window.addEventListener('pywebviewready', async () => {
   applyTheme(state.config.theme || 'dark');
   applyFontSize(state.config.font_size || 14);
   populateModelSelect();
+  // Restore persistent toggle states
+  const uiState = await window.pywebview.api.get_ui_state();
+  initThinkingBtn(uiState.thinking);
+  initSearchBtn(uiState.search_mode, uiState.search_enabled);
   state.conversations = await window.pywebview.api.list_conversations();
   renderConvList();
   if (state.conversations.length > 0) {
@@ -392,6 +396,7 @@ window.Chat = {
   },
   showToolResult(toolName, result) {
     addToolResultBubble(toolName, result);
+    if (toolName.startsWith('worktree_')) refreshWorktreePanel();
   },
   updateTodo(items) {
     const panel = $('todo-panel');
@@ -438,6 +443,8 @@ window.Chat = {
     div.innerHTML = `<div class="bubble-label">Team</div><div class="bubble-content">${escapeHtml(msg)}</div>`;
     chatMessages.appendChild(div);
     scrollToBottom();
+    // Refresh worktree panel on team activity
+    refreshWorktreePanel();
   },
   updateContext(used, total) {
     updateContextBar(used, total);
@@ -781,14 +788,123 @@ function clearFileChips() {
 // ── Todo panel ───────────────────────────────────────────────────────
 $('btn-todo-close').addEventListener('click', () => $('todo-panel').classList.add('hidden'));
 
+// ── Worktree panel ──────────────────────────────────────────────────
+$('btn-wt-close').addEventListener('click', () => $('wt-panel').classList.add('hidden'));
+
+async function refreshWorktreePanel() {
+  try {
+    const wts = await window.pywebview.api.get_worktrees();
+    const panel = $('wt-panel');
+    const list = $('wt-list');
+    // Only show active/kept worktrees
+    const visible = (wts || []).filter(w => w.status !== 'removed');
+    if (visible.length === 0) {
+      panel.classList.add('hidden');
+      return;
+    }
+    panel.classList.remove('hidden');
+    list.innerHTML = '';
+    visible.forEach(wt => {
+      const li = document.createElement('li');
+      const statusCls = wt.status || 'active';
+      const labels = { active: 'ACTIVE', kept: 'KEPT' };
+      const taskStr = wt.task_id != null ? `task #${wt.task_id}` : '';
+      li.innerHTML = `<span class="wt-status ${statusCls}">${labels[statusCls] || statusCls}</span>`
+        + `<span class="wt-info"><span class="wt-name">${escapeHtml(wt.name)}</span>`
+        + `<span class="wt-detail">${escapeHtml(wt.branch || '')}${taskStr ? ' · ' + taskStr : ''}</span></span>`;
+      list.appendChild(li);
+    });
+  } catch { /* ignore if API not ready */ }
+}
+
 // ── Thinking mode toggle ──────────────────────────────────────────
 let _thinkingBubble = null;
 let _thinkingContent = '';
+
+function initThinkingBtn(active) {
+  const btn = $('btn-thinking');
+  btn.classList.toggle('active', !!active);
+  window.pywebview.api.set_thinking(!!active);
+}
 
 $('btn-thinking').addEventListener('click', () => {
   const btn = $('btn-thinking');
   const active = btn.classList.toggle('active');
   window.pywebview.api.set_thinking(active);
+});
+
+// ── Search mode button ────────────────────────────────────────────
+// state: search_mode = 'auto' | 'manual', search_enabled = bool
+let _searchMode = 'auto';
+let _searchEnabled = true;
+
+function initSearchBtn(mode, enabled) {
+  _searchMode = mode || 'auto';
+  _searchEnabled = enabled !== false;
+  _renderSearchBtn();
+}
+
+function _renderSearchBtn() {
+  const btn = $('btn-search');
+  const items = document.querySelectorAll('.search-dropdown-item');
+  if (_searchMode === 'auto') {
+    // Auto mode: button always lit, shows current mode label
+    btn.classList.add('active');
+    btn.title = '联网搜索：自动（模型决定）';
+  } else {
+    // Manual mode: button lit/dim based on _searchEnabled
+    btn.classList.toggle('active', _searchEnabled);
+    btn.title = _searchEnabled ? '联网搜索：已开启（点击关闭）' : '联网搜索：已关闭（点击开启）';
+  }
+  items.forEach(el => {
+    el.classList.toggle('selected', el.dataset.mode === _searchMode);
+  });
+}
+
+// Main button click: auto mode → no-op (mode is always on); manual mode → toggle enabled
+$('btn-search').addEventListener('click', () => {
+  if (_searchMode === 'manual') {
+    _searchEnabled = !_searchEnabled;
+    window.pywebview.api.set_search_enabled(_searchEnabled);
+    _renderSearchBtn();
+  }
+  // auto mode: clicking the main button does nothing (use arrow to change mode)
+});
+
+// Arrow button: toggle dropdown
+let _searchDropdownOpen = false;
+function _openSearchDropdown() {
+  _searchDropdownOpen = true;
+  $('search-dropdown').classList.remove('hidden');
+}
+function _closeSearchDropdown() {
+  _searchDropdownOpen = false;
+  $('search-dropdown').classList.add('hidden');
+}
+
+$('btn-search-arrow').addEventListener('click', (e) => {
+  e.stopPropagation();
+  _searchDropdownOpen ? _closeSearchDropdown() : _openSearchDropdown();
+});
+
+// Dropdown item click
+document.querySelectorAll('.search-dropdown-item').forEach(el => {
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _searchMode = el.dataset.mode;
+    if (_searchMode === 'auto') _searchEnabled = true;
+    window.pywebview.api.set_search_mode(_searchMode);
+    window.pywebview.api.set_search_enabled(_searchEnabled);
+    _closeSearchDropdown();
+    _renderSearchBtn();
+  });
+});
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+  if (_searchDropdownOpen && !$('search-btn-wrap').contains(e.target)) {
+    _closeSearchDropdown();
+  }
 });
 
 // ── Export ────────────────────────────────────────────────────────
