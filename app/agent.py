@@ -240,7 +240,7 @@ class Agent:
         on_tool_result: Callable[[str, str], None],
         on_confirm: Callable[[str, dict], bool],
         on_done: Callable[[list[dict]], None],
-        on_error: Callable[[str], None],
+        on_error: Callable[[str, list], None],
         on_todo_update: Optional[Callable[[list[dict]], None]] = None,
         on_context_update: Optional[Callable[[int, int], None]] = None,
         on_thinking: Optional[Callable[[str], None]] = None,
@@ -280,7 +280,7 @@ class Agent:
                 # Patch any that are missing it (old history, compact summaries, etc.)
                 if self._is_reasoner() and self._provider() == "deepseek":
                     full_messages = [
-                        {**msg, "reasoning_content": msg.get("reasoning_content", "")}
+                        {**msg, "reasoning_content": msg.get("reasoning_content") or ""}
                         if msg.get("role") == "assistant" else msg
                         for msg in full_messages
                     ]
@@ -411,4 +411,4 @@ class Agent:
             on_done(all_messages[1:])
 
         except Exception as e:
-            on_error(str(e))
+            on_error(str(e), all_messages[1:])

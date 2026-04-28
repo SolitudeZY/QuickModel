@@ -270,7 +270,7 @@ class API:
                 on_tool_result=self._on_tool_result,
                 on_confirm=self._on_confirm,
                 on_done=lambda msgs: self._on_done(conv, msgs),
-                on_error=self._on_error,
+                on_error=lambda err, msgs: self._on_error(conv, err, msgs),
                 on_todo_update=self._on_todo_update,
                 on_context_update=self._on_context_update,
                 on_thinking=self._on_thinking,
@@ -310,7 +310,7 @@ class API:
                 on_tool_result=self._on_tool_result,
                 on_confirm=self._on_confirm,
                 on_done=lambda msgs: self._on_done(conv, msgs),
-                on_error=self._on_error,
+                on_error=lambda err, msgs: self._on_error(conv, err, msgs),
                 on_todo_update=self._on_todo_update,
                 on_context_update=self._on_context_update,
                 on_thinking=self._on_thinking,
@@ -408,6 +408,8 @@ class API:
         except Exception:
             pass
 
-    def _on_error(self, error: str):
+    def _on_error(self, conv: dict, error: str, messages: list):
+        conv['messages'] = messages
+        save_conversation(conv)
         self._running = False
         self._js(f'Chat.showError({json.dumps(error)})')
