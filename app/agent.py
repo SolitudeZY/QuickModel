@@ -258,6 +258,8 @@ class Agent:
         try:
             max_rounds = self.max_rounds
             round_count = 0
+            search_count = 0
+            SEARCH_SOFT_LIMIT = 10
             threshold = AUTO_COMPACT_THRESHOLD_V4 if self.model in V4_MODELS else AUTO_COMPACT_THRESHOLD
             while not self._stop_flag.is_set() and round_count < max_rounds:
                 # 注入后台任务完成通知
@@ -413,6 +415,12 @@ class Agent:
                         used_todo = True
                         if on_todo_update:
                             on_todo_update(self._todo.get_items())
+
+                    # Search soft limit: nudge model to stop after N searches
+                    if tool_name == "web_search":
+                        search_count += 1
+                        if search_count >= SEARCH_SOFT_LIMIT:
+                            result += f"\n\n⚠ 你已经搜索了 {search_count} 次。请根据已有结果整理回答，检查是否需要继续搜索，如无必要，请整理现有内容并作出回答。"
 
                     on_tool_result(tool_name, result)
                     all_messages.append({

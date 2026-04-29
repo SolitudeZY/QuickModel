@@ -237,7 +237,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "使用 Tavily 搜索互联网，获取实时信息",
+            "description": "使用 Tavily 搜索互联网获取实时信息。每次搜索消耗 API 配额，请高效使用：先用一个精准的关键词搜索，根据结果判断是否需要补充搜索。通常 1-10 次搜索即可满足需求，避免对同一主题反复搜索。如果前几次搜索已经获得足够信息，请直接整理回答。",
             "parameters": {
                 "type": "object",
                 "properties": {
