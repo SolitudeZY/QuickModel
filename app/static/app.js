@@ -426,10 +426,7 @@ window.Chat = {
     _thinkingBubble = null;
     _thinkingContent = '';
     setRunning(false);
-    window.pywebview.api.list_conversations().then(convs => {
-      state.conversations = convs;
-      renderConvList(searchInput.value);
-    });
+    renderConvList(searchInput.value);
   },
   updateConvTitle(convId, title) {
     const conv = state.conversations.find(c => c.id === convId);
@@ -712,6 +709,38 @@ async function refreshSkillList() {
 }
 
 $('btn-skill-close').addEventListener('click', () => $('skill-overlay').classList.add('hidden'));
+$('btn-skill-import').addEventListener('click', async () => {
+  const skills = await window.pywebview.api.import_skill();
+  if (!skills || skills.length === 0) return;
+  if (skills.length === 1) {
+    // Single skill: populate form for review before saving
+    const s = skills[0];
+    _editingSkill = null;
+    $('skill-name').value = s.name;
+    $('skill-desc').value = s.description;
+    $('skill-content').value = s.content;
+    $('skill-name').focus();
+  } else {
+    // Batch import: confirm then save all
+    if (!confirm(`发现 ${skills.length} 个技能，全部导入？`)) return;
+    let count = 0;
+    for (const s of skills) {
+      if (s.name) {
+        await window.pywebview.api.save_skill(s.name, s.description, s.content);
+        count++;
+      }
+    }
+    await refreshSkillList();
+    // Show first imported skill in form
+    if (skills[0]) {
+      _editingSkill = skills[0].name;
+      $('skill-name').value = skills[0].name;
+      $('skill-desc').value = skills[0].description;
+      $('skill-content').value = skills[0].content;
+    }
+    alert(`已导入 ${count} 个技能`);
+  }
+});
 $('btn-skill-new').addEventListener('click', () => {
   _editingSkill = null;
   $('skill-name').value = '';

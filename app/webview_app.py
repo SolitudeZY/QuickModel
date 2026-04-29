@@ -16,7 +16,7 @@ from app.tools import read_file as _read_file
 from app.vision import is_image, describe_image
 from app.advanced_tools import TodoManager, TaskManager, BackgroundManager
 from app.team import TEAM, WORKTREES
-from app.skills import skill_list, skill_save, skill_delete, skill_read, memory_list, memory_read, memory_write
+from app.skills import skill_list, skill_save, skill_delete, skill_read, memory_list, memory_read, memory_write, skill_import_from_path
 
 
 def get_static_dir() -> Path:
@@ -138,6 +138,17 @@ class API:
 
     def read_skill(self, name: str) -> str:
         return skill_read(name)
+
+    def import_skill(self) -> list:
+        """Open a folder picker and import Claude-style skill(s) from the selected path."""
+        result = self._window.create_file_dialog(
+            webview.FileDialog.FOLDER_DIALOG,
+            directory='',
+        )
+        if not result:
+            return []
+        folder = result[0] if isinstance(result, (list, tuple)) else result
+        return skill_import_from_path(folder)
 
     # ── Memory ────────────────────────────────────────────────────
     def list_memory(self) -> list:

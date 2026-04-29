@@ -55,9 +55,9 @@ def rename_conversation(conv_id: str, new_title: str) -> None:
 def list_conversations() -> list[dict]:
     """返回所有对话摘要。
     排序规则：
-    - 有手动拖拽排序（sort_order >= 0）的对话，按 sort_order 升序排在最前
-    - 其余按 updated_at 降序（最新修改在上）
-    默认 sort_order = -1 表示未手动排序，跟随时间。
+    - sort_order >= 0 的对话（手动拖拽固定）按 sort_order 升序排在最前
+    - sort_order = -1 的对话按 updated_at 降序（最新在上），插在最前面
+    这样新对话和最近活跃的对话始终出现在列表顶部。
     """
     convs = []
     for p in get_conversations_dir().glob("conv_*.json"):
@@ -74,11 +74,11 @@ def list_conversations() -> list[dict]:
         except Exception:
             continue
 
-    pinned = [c for c in convs if c["sort_order"] >= 0]
     unpinned = [c for c in convs if c["sort_order"] < 0]
-    pinned.sort(key=lambda c: c["sort_order"])
+    pinned = [c for c in convs if c["sort_order"] >= 0]
     unpinned.sort(key=lambda c: c["updated_at"], reverse=True)
-    return pinned + unpinned
+    pinned.sort(key=lambda c: c["sort_order"])
+    return unpinned + pinned
 
 
 def update_sort_orders(ordered_ids: list[str]) -> None:
