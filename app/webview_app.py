@@ -142,7 +142,7 @@ class API:
     def import_skill(self) -> list:
         """Open a folder picker and import Claude-style skill(s) from the selected path."""
         result = self._window.create_file_dialog(
-            webview.FileDialog.FOLDER_DIALOG,
+            webview.FileDialog.FOLDER,
             directory='',
         )
         if not result:
