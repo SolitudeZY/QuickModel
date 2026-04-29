@@ -1,15 +1,21 @@
 # QuickModel
 
-A desktop Agent frontend powered by pywebview, connecting to AI models through their chat-completion APIs with full tool-use capabilities. Run an autonomous agent locally — read/write files, execute PowerShell commands, search the web, collaborate with sub-agents, and more, all within an isolated worktree environment.
+A desktop AI assistant for Windows supporting multiple LLM vendors via OpenAI-compatible API. Built with pywebview (WebView2) + Python backend.
+
+![Platform](https://img.shields.io/badge/platform-Windows-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+English | [中文](./README.zh.md)
 
 ## Features
 
 ### Core Agent
-- **Multi-Provider Support** — DeepSeek (V3/R1/V4 Pro), OpenAI, Anthropic, and any OpenAI-compatible API
-- **Multiple Models per Provider** — Configure and switch between multiple model backends in settings
-- **Thinking Mode** — Toggle reasoning chains on/off with a single toolbar button (persisted across sessions)
-- **Auto-Compact** — When context grows large, automatically summarize and compress conversation history to stay within token limits
-- **Vision** — Paste or drop images into the chat; images are described via a vision API (Qwen VL or compatible) and attached as context
+- **Multi-vendor LLM** — Works with any OpenAI-compatible API: DeepSeek (V3/R1/V4 Pro), OpenAI, Qwen, Ollama, and more
+- **Multiple models per provider** — Configure and switch between multiple model backends in settings
+- **Thinking mode** — Extended reasoning support with toolbar toggle (persisted across sessions)
+- **Auto-Compact** — Context auto-summarizes at 80k tokens; manual `/compact` command also available
+- **Image understanding** — Paste or drop images into chat; described via Qwen-VL or any vision API
 
 ### Tools Built into the Agent
 | Tool | Description |
@@ -17,75 +23,88 @@ A desktop Agent frontend powered by pywebview, connecting to AI models through t
 | `read_file` | Read local files (txt, md, py, json, csv, pdf, docx, xlsx, etc.) |
 | `write_file` | Write or overwrite files on disk |
 | `list_directory` | List directory contents |
-| `run_command` | Execute PowerShell commands locally |
+| `run_command` | Execute PowerShell commands (with confirmation dialog) |
 | `web_search` | Search the internet via Tavily API |
 | `web_read` | Fetch and read full webpage content (HTML → plain text) |
 | `compact` | Manually trigger context compression |
 | `todo_write` | Maintain a structured task list for multi-step work tracking |
 
 ### Search Control
-- **Auto / Manual modes** — In auto mode, the model decides when to search; in manual mode, you toggle search on/off with a toolbar button
-- **Soft limit** — After 5 searches in a single turn, the agent is automatically nudged to consolidate existing results rather than keep searching
-- **`web_read` companion** — When search snippets are insufficient, the agent can fetch the full page content for deeper analysis
+- **Auto / Manual modes** — Auto lets the model decide; manual gives you a toolbar toggle
+- **Soft limit** — After 5 searches in one turn, the agent is nudged to consolidate results
+- **`web_read` companion** — Fetch full page content when search snippets are insufficient
 
 ### Skills System
-- **Built-in Skills** — Pre-configured agent behaviors that change how the model approaches tasks (e.g., code review, research, planning)
-- **Custom Skills** — Create your own skills: name, description, and a prompt that gets injected into the system message
-- **Import from Folder** — Import Claude-style skills (`.md` files) from a local folder; auto-detects `SKILL.md` files
-- **Skill Editor** — Full create/edit/delete UI panel for managing skills
+- **Built-in & custom skills** — Save and reuse prompt templates that change agent behavior
+- **Import from folder** — Import Claude-style skills (auto-detects `SKILL.md` files)
+- **Full CRUD panel** — Create, edit, and delete skills from a management UI
 
 ### Memory System
-- **Persistent Key-Value Store** — Save facts, preferences, or context for the agent to recall across conversations
-- **Memory Diff Export** — Export all memories as a formatted document
-- Full API: `memory_read`, `memory_write` — the agent can use these as tools
+- **Persistent key-value store** — Agent can save and recall facts across conversations (`memory_read`, `memory_write`)
+- **Export** — Export all memories as a formatted diff document
 
 ### Worktree Isolation
-- **Git Worktree Integration** — Each conversation can operate in its own isolated git worktree
-- **Worktree Panel** — Side panel showing active worktrees with their branch and task associations
-- **Safe by Default** — Command confirmation dialog with "allow all" and wildcard pattern suggestions (`git *`, `python *`)
-- **Create / List / Remove** — Full worktree lifecycle management from within the agent or manually
+- **Git worktree integration** — Each conversation operates in its own isolated worktree
+- **Command safety** — Confirmation dialog with wildcard pattern suggestions (`git *`, `python *`)
+- **Worktree panel** — Side panel showing active worktrees, branches, and bound tasks
 
 ### Team Collaboration
-- **Multi-Agent Teams** — Spawn persistent team members running in independent threads
-- **Message Passing** — Agents communicate via an in-memory message bus (inbox/outbox)
-- **Notification Callback** — UI receives real-time notifications when team members complete work
-- **Shutdown Protocol** — Graceful shutdown of team members with confirmation
+- **Multi-agent teams** — Spawn persistent team members running in independent threads
+- **Message bus** — In-memory inbox/outbox for agent-to-agent communication
+- **UI notifications** — Real-time callback when team members complete work
 
 ### Task Management
-- **Persistent Tasks** — Create structured tasks that survive across conversations
-- **Blocking Dependencies** — Tasks can block each other, forming a dependency graph
-- **Status Tracking** — pending → in_progress → completed/deleted workflow
-- **Auto-complete on Worktree Remove** — Optionally mark bound tasks as done when removing a worktree
+- **Persistent tasks** — Structured tasks that survive across conversations
+- **Dependency graph** — Tasks can block each other (pending → in_progress → completed)
+- **Worktree binding** — Tasks auto-complete when bound worktrees are removed
 
 ### UI
-- **pywebview Desktop App** — Native window with web-based chat interface
-- **Conversation Management** — Sidebar with drag-to-reorder, search, rename, delete conversations
-- **Collapsible Tool Bubbles** — Tool calls and results shown in collapsible message bubbles
-- **Chat Navigation** — Previous/next message buttons for smooth scrolling through long conversations
-- **Command Confirmation Dialog** — Review and approve shell commands before execution, with wildcard allow-list
-- **Theme Support** — Light and dark themes, adjustable font size
+- **pywebview desktop app** — Native window with web-based chat interface
+- **Conversation management** — Sidebar with drag-to-reorder, search, rename, delete, export to Markdown
+- **Collapsible tool bubbles** — Tool calls and results in collapsible message bubbles
+- **Chat navigation** — Previous/next message buttons for long conversations
+- **Markdown & LaTeX** — Full rendering with marked.js and KaTeX (offline, no CDN)
+- **Theme support** — Light and dark themes, adjustable font size
+
+## Screenshots
+
+> Coming soon
+
+## Requirements
+
+- Windows 10/11 with [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (usually pre-installed on Win11)
+- Python 3.10+
+- API key for at least one supported LLM provider
 
 ## Installation
 
+### Run from source
+
 ```bash
-# 1. Install dependencies
+git clone https://github.com/your-username/quick-model.git
+cd quick-model
+
 pip install openai pywebview tavily-python
 
-# 2. Clone the repository
-git clone <repo-url>
-cd quick_model
-
-# 3. Create configuration
-# On first launch, a settings panel will appear.
-# Configure your API keys and model preferences.
-
-# 4. Launch
 python main.py
 ```
 
+### Download pre-built .exe
+
+Download `QuickModel.exe` from [Releases](https://github.com/your-username/quick-model/releases) and run directly. No installation needed.
+
+## Build
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name QuickModel --add-data "app/static;app/static" main.py
+```
+
+Output: `dist/QuickModel.exe`
+
 ## Configuration
 
-All settings are stored in `config.json` under the app directory. Key settings:
+On first launch, open **Settings** to configure. Config is stored in `%APPDATA%\AIDesktopAssistant\config.json`.
 
 ```json
 {
@@ -112,10 +131,20 @@ All settings are stored in `config.json` under the app directory. Key settings:
 | `api_key` / `base_url` / `model` | Primary model configuration |
 | `model_configs` | Multiple model backends (switchable in settings) |
 | `thinking` | Thinking mode on by default |
-| `search_mode` | `"auto"` = model decides when to search; `"manual"` = user toggles |
+| `search_mode` | `"auto"` = model decides; `"manual"` = user toggles via toolbar |
 | `search_enabled` | When manual mode, whether search tools are available |
 | `tavily_api_key` | API key for web search |
 | `vision_api_key` / `vision_base_url` / `vision_model` | Vision model for image description |
+
+## Supported Providers
+
+| Provider | Base URL |
+|----------|----------|
+| DeepSeek | `https://api.deepseek.com/v1` |
+| OpenAI | `https://api.openai.com/v1` |
+| Ollama (local) | `http://localhost:11434/v1` |
+| DashScope (Qwen) | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Any OpenAI-compatible API | Custom URL |
 
 ## Usage Tips
 
@@ -150,6 +179,13 @@ quick_model/
 │   └── skills/          # Default skill definitions (.md files)
 └── conversations/       # Conversation history (auto-created)
 ```
+
+## Tech Stack
+
+- **Frontend**: pywebview (WebView2), HTML/CSS/JS
+- **Backend**: Python, OpenAI SDK
+- **Rendering**: marked.js, KaTeX, highlight.js (all local, offline)
+- **Packaging**: PyInstaller
 
 ## License
 
