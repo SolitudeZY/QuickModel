@@ -279,8 +279,8 @@ class Agent:
                         "content": f"<team_inbox>来自 {im.get('from','?')} 的消息：{im.get('content','')}</team_inbox>",
                     })
 
-                # microcompact：清理旧 tool result
-                microcompact(all_messages)
+                # microcompact：只压缩滑动窗口外的旧 tool result，保留窗口内消息不变以命中缓存
+                microcompact(all_messages, self.CONTEXT_WINDOW)
 
                 # auto_compact：token 超限时压缩
                 if estimate_tokens(all_messages) > threshold:
