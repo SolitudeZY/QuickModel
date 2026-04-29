@@ -126,7 +126,7 @@ class Agent:
     def _all_tools(self) -> list:
         tools = TOOLS_SCHEMA + ADVANCED_TOOLS_SCHEMA
         if not self.search_enabled:
-            tools = [t for t in tools if t.get("function", {}).get("name") != "web_search"]
+            tools = [t for t in tools if t.get("function", {}).get("name") not in ("web_search", "web_read")]
         return tools
 
     def _dispatch_advanced(self, tool_name: str, args: dict) -> Optional[str]:
@@ -259,7 +259,7 @@ class Agent:
             max_rounds = self.max_rounds
             round_count = 0
             search_count = 0
-            SEARCH_SOFT_LIMIT = 10
+            SEARCH_SOFT_LIMIT = 5
             threshold = AUTO_COMPACT_THRESHOLD_V4 if self.model in V4_MODELS else AUTO_COMPACT_THRESHOLD
             while not self._stop_flag.is_set() and round_count < max_rounds:
                 # 注入后台任务完成通知

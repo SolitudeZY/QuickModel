@@ -185,11 +185,46 @@ def web_search(query: str, max_results: int = 5, api_key: str = "") -> str:
         for i, r in enumerate(results, 1):
             lines.append(f"{i}. {r.get('title', '')}")
             lines.append(f"   URL: {r.get('url', '')}")
-            lines.append(f"   {r.get('content', '')[:300]}")
+            lines.append(f"   {r.get('content', '')[:600]}")
             lines.append("")
         return "\n".join(lines)
     except Exception as e:
         return f"搜索失败：{e}"
+
+
+def web_read(url: str, max_chars: int = 20000) -> str:
+    """Fetch a URL and return its text content (HTML stripped to readable text)."""
+    try:
+        import urllib.request
+        import re as _re
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read()
+        # Try utf-8 first, then detect from headers
+        charset = "utf-8"
+        ct = resp.headers.get("Content-Type", "")
+        if "charset=" in ct:
+            charset = ct.split("charset=")[-1].strip().split(";")[0]
+        try:
+            html = raw.decode(charset)
+        except Exception:
+            html = raw.decode("utf-8", errors="replace")
+        # Strip HTML tags, scripts, styles
+        html = _re.sub(r'<script[^>]*>[\s\S]*?</script>', '', html, flags=_re.IGNORECASE)
+        html = _re.sub(r'<style[^>]*>[\s\S]*?</style>', '', html, flags=_re.IGNORECASE)
+        html = _re.sub(r'<[^>]+>', ' ', html)
+        # Collapse whitespace
+        text = _re.sub(r'\s+', ' ', html).strip()
+        # Decode HTML entities
+        import html as _html_mod
+        text = _html_mod.unescape(text)
+        if len(text) > max_chars:
+            text = text[:max_chars] + f"\n\n[内容已截断，共 {len(text)} 字符，显示前 {max_chars} 字符]"
+        return text if text else "（页面无文本内容）"
+    except Exception as e:
+        return f"读取失败：{e}"
 
 
 def write_file(path: str, content: str) -> str:
@@ -237,7 +272,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "使用 Tavily 搜索互联网获取实时信息。每次搜索消耗 API 配额，请高效使用：先用一个精准的关键词搜索，根据结果判断是否需要补充搜索。通常 1-10 次搜索即可满足需求，避免对同一主题反复搜索。如果前几次搜索已经获得足够信息，请直接整理回答。",
+            "description": "使用 Tavily 搜索互联网获取实时信息。每次搜索消耗 API 配额，请高效使用：先用一个精准的关键词搜索，根据结果判断是否需要补充搜索。通常 1-5 次搜索即可满足需求，避免对同一主题反复搜索。如果搜索结果的摘要不够详细，请使用 web_read 工具读取具体网页的完整内容，而不是继续搜索。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -245,6 +280,20 @@ TOOLS_SCHEMA = [
                     "max_results": {"type": "integer", "description": "返回结果数量，默认 5", "default": 5},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_read",
+            "description": "读取指定 URL 的网页完整内容（HTML 转纯文本）。当 web_search 的摘要不够详细时，用此工具获取完整页面。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "要读取的网页 URL"},
+                },
+                "required": ["url"],
             },
         },
     },
@@ -292,6 +341,8 @@ def dispatch(tool_name: str, args: dict, tavily_key: str = "", timeout: int = 30
         return list_directory(args.get("path", ""))
     elif tool_name == "web_search":
         return web_search(args.get("query", ""), args.get("max_results", 5), api_key=tavily_key)
+    elif tool_name == "web_read":
+        return web_read(args.get("url", ""))
     elif tool_name == "run_command":
         return run_command(args.get("command", ""), args.get("timeout", timeout), stop_flag=stop_flag)
     elif tool_name == "write_file":
