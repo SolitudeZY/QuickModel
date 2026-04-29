@@ -111,11 +111,16 @@ def run_command(command: str, timeout: int = 30, stop_flag=None) -> str:
     import time, threading
 
     try:
+        # CREATE_NO_WINDOW prevents PowerShell console from flashing
+        creationflags = 0
+        if os.name == 'nt':
+            creationflags = subprocess.CREATE_NO_WINDOW
         proc = subprocess.Popen(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
         )
 
         result_holder = {}

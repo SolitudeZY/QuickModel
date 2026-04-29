@@ -476,11 +476,22 @@ window.Chat = {
     addErrorBubble(msg);
     setRunning(false);
   },
-  showConfirmDialog(toolName, args) {
+  showConfirmDialog(toolName, args, wildcard) {
     $('confirm-title').textContent = `确认执行：${toolName}`;
     $('confirm-detail').textContent = JSON.stringify(args, null, 2);
     _confirmCommand = args.command || '';
+    _confirmWildcard = wildcard || '';
     $('btn-confirm-always').style.display = (toolName === 'run_command' && _confirmCommand) ? '' : 'none';
+    // Show wildcard button when backend suggests a pattern
+    const btnWild = $('btn-confirm-wildcard');
+    if (btnWild) {
+      if (_confirmWildcard) {
+        btnWild.style.display = '';
+        btnWild.textContent = `允许所有 ${_confirmWildcard}`;
+      } else {
+        btnWild.style.display = 'none';
+      }
+    }
     $('confirm-overlay').classList.remove('hidden');
   },
 };
@@ -491,6 +502,7 @@ function removeTypingIndicator() {
 
 // ── Confirm dialog ────────────────────────────────────────────────
 let _confirmCommand = '';
+let _confirmWildcard = '';
 $('btn-confirm-yes').addEventListener('click', () => {
   $('confirm-overlay').classList.add('hidden');
   window.pywebview.api.confirm_tool(true);
@@ -502,6 +514,10 @@ $('btn-confirm-no').addEventListener('click', () => {
 $('btn-confirm-always').addEventListener('click', () => {
   $('confirm-overlay').classList.add('hidden');
   window.pywebview.api.confirm_tool_always(_confirmCommand);
+});
+$('btn-confirm-wildcard').addEventListener('click', () => {
+  $('confirm-overlay').classList.add('hidden');
+  window.pywebview.api.confirm_tool_always(_confirmWildcard);
 });
 
 // ── Send message ──────────────────────────────────────────────────

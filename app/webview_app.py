@@ -48,6 +48,8 @@ class API:
         self._thinking = bool(self._config.get("thinking", True))
         self._search_mode = self._config.get("search_mode", "auto")    # "auto" | "manual"
         self._search_enabled = bool(self._config.get("search_enabled", True))
+        # Track command prefix approvals for wildcard suggestion
+        self._cmd_prefix_counts: dict[str, int] = {}
         # Team notification callback — push teammate activity to UI
         TEAM.set_notification_cb(lambda msg: self._js(f'Chat.showTeamNotification({json.dumps(msg)})'))
 
@@ -381,7 +383,16 @@ class API:
             if is_command_allowed(cmd):
                 return True
         self._confirm_event.clear()
-        self._js(f'Chat.showConfirmDialog({json.dumps(tool_name)}, {json.dumps(args)})')
+        # Check if we should suggest a wildcard pattern
+        wildcard = ""
+        if tool_name == "run_command":
+            cmd = args.get("command", "").strip()
+            prefix = cmd.split()[0] if cmd.split() else ""
+            if prefix:
+                self._cmd_prefix_counts[prefix] = self._cmd_prefix_counts.get(prefix, 0) + 1
+                if self._cmd_prefix_counts[prefix] >= 3:
+                    wildcard = f"{prefix} *"
+        self._js(f'Chat.showConfirmDialog({json.dumps(tool_name)}, {json.dumps(args)}, {json.dumps(wildcard)})')
         self._confirm_event.wait()
         return self._confirm_result
 
@@ -391,6 +402,9 @@ class API:
 
     def confirm_tool_always(self, command: str) -> None:
         add_allowed_command(command)
+        # Reset prefix counter if it's a wildcard pattern
+        prefix = command.replace(" *", "").replace("*", "").strip()
+        self._cmd_prefix_counts.pop(prefix, None)
         self._confirm_result = True
         self._confirm_event.set()
 
