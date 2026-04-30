@@ -176,23 +176,184 @@ def run_command(command: str, timeout: int = 30, stop_flag=None) -> str:
         return f"执行失败：{e}"
 
 
-def web_search(query: str, max_results: int = 5, api_key: str = "") -> str:
+def web_search(query: str, max_results: int = 5, engine: str = "tavily",
+               api_keys: dict = None, fallback: bool = True) -> str:
+    """统一搜索入口。engine 指定首选引擎，fallback=True 时失败自动降级。"""
+    api_keys = api_keys or {}
+    order = _build_engine_order(engine, api_keys)
+    last_error = ""
+    for eng in order:
+        result = _search_by_engine(eng, query, max_results, api_keys)
+        if not result.startswith("搜索失败") and not result.startswith("错误"):
+            return f"[{eng}] {result}"
+        last_error = result
+        if not fallback:
+            return result
+    return last_error or "所有搜索引擎均失败"
+
+
+# ── 引擎降级顺序 ────────────────────────────────────────────────────
+
+_ENGINE_PRIORITY = ["tavily", "bing", "google", "searxng", "duckduckgo"]
+
+def _engine_available(eng: str, api_keys: dict) -> bool:
+    """Check if an engine has the required credentials configured."""
+    if eng == "duckduckgo":
+        return True
+    if eng == "tavily":
+        return bool(api_keys.get("tavily_api_key"))
+    if eng == "bing":
+        return bool(api_keys.get("bing_api_key"))
+    if eng == "google":
+        return bool(api_keys.get("google_api_key")) and bool(api_keys.get("google_cx"))
+    if eng == "searxng":
+        return bool(api_keys.get("searxng_url"))
+    return False
+
+
+def _build_engine_order(preferred: str, api_keys: dict) -> list[str]:
+    """Build fallback order: preferred first, then others with keys, DuckDuckGo last."""
+    order = []
+    if preferred and _engine_available(preferred, api_keys):
+        order.append(preferred)
+    for eng in _ENGINE_PRIORITY:
+        if eng not in order and _engine_available(eng, api_keys):
+            order.append(eng)
+    if "duckduckgo" not in order:
+        order.append("duckduckgo")
+    return order
+
+
+def _search_by_engine(engine: str, query: str, max_results: int, api_keys: dict) -> str:
+    if engine == "tavily":
+        return _search_tavily(query, max_results, api_keys.get("tavily_api_key", ""))
+    elif engine == "duckduckgo":
+        return _search_duckduckgo(query, max_results)
+    elif engine == "bing":
+        return _search_bing(query, max_results, api_keys.get("bing_api_key", ""))
+    elif engine == "google":
+        return _search_google(query, max_results,
+                              api_keys.get("google_api_key", ""), api_keys.get("google_cx", ""))
+    elif engine == "searxng":
+        return _search_searxng(query, max_results, api_keys.get("searxng_url", ""))
+    return f"错误：未知搜索引擎 {engine}"
+
+
+def _format_results(results: list[dict]) -> str:
+    """Format a list of {title, url, content} dicts into readable text."""
+    if not results:
+        return "未找到相关结果"
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r.get('title', '')}")
+        lines.append(f"   URL: {r.get('url', '')}")
+        lines.append(f"   {r.get('content', '')[:600]}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# ── Tavily ───────────────────────────────────────────────────────────
+
+def _search_tavily(query: str, max_results: int, api_key: str) -> str:
     if not api_key:
-        return "错误：未配置 Tavily API Key，请在设置中填写"
+        return "错误：未配置 Tavily API Key"
     try:
         from tavily import TavilyClient
         client = TavilyClient(api_key=api_key)
         resp = client.search(query=query, max_results=max_results)
-        results = resp.get("results", [])
-        if not results:
+        items = resp.get("results", [])
+        return _format_results([
+            {"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", "")}
+            for r in items
+        ])
+    except Exception as e:
+        return f"搜索失败：{e}"
+
+
+# ── DuckDuckGo ───────────────────────────────────────────────────────
+
+def _search_duckduckgo(query: str, max_results: int) -> str:
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            raw = list(ddgs.text(query, max_results=max_results))
+        if not raw:
             return "未找到相关结果"
-        lines = []
-        for i, r in enumerate(results, 1):
-            lines.append(f"{i}. {r.get('title', '')}")
-            lines.append(f"   URL: {r.get('url', '')}")
-            lines.append(f"   {r.get('content', '')[:600]}")
-            lines.append("")
-        return "\n".join(lines)
+        return _format_results([
+            {"title": r.get("title", ""), "url": r.get("href", ""), "content": r.get("body", "")}
+            for r in raw
+        ])
+    except ImportError:
+        return "搜索失败：duckduckgo-search 未安装，请运行 pip install duckduckgo-search"
+    except Exception as e:
+        return f"搜索失败：{e}"
+
+
+# ── Bing Search API ──────────────────────────────────────────────────
+
+def _search_bing(query: str, max_results: int, api_key: str) -> str:
+    if not api_key:
+        return "错误：未配置 Bing API Key"
+    try:
+        import urllib.request
+        import urllib.parse
+        url = f"https://api.bing.microsoft.com/v7.0/search?q={urllib.parse.quote(query)}&count={max_results}"
+        req = urllib.request.Request(url, headers={
+            "Ocp-Apim-Subscription-Key": api_key,
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        pages = data.get("webPages", {}).get("value", [])
+        return _format_results([
+            {"title": p.get("name", ""), "url": p.get("url", ""), "content": p.get("snippet", "")}
+            for p in pages
+        ])
+    except Exception as e:
+        return f"搜索失败：{e}"
+
+
+# ── Google Custom Search ─────────────────────────────────────────────
+
+def _search_google(query: str, max_results: int, api_key: str, cx: str) -> str:
+    if not api_key or not cx:
+        return "错误：未配置 Google API Key 或 CX ID"
+    try:
+        import urllib.request
+        import urllib.parse
+        num = min(max_results, 10)
+        url = (f"https://www.googleapis.com/customsearch/v1"
+               f"?key={api_key}&cx={cx}&q={urllib.parse.quote(query)}&num={num}")
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        items = data.get("items", [])
+        return _format_results([
+            {"title": it.get("title", ""), "url": it.get("link", ""), "content": it.get("snippet", "")}
+            for it in items
+        ])
+    except Exception as e:
+        return f"搜索失败：{e}"
+
+
+# ── SearXNG ──────────────────────────────────────────────────────────
+
+def _search_searxng(query: str, max_results: int, base_url: str) -> str:
+    if not base_url:
+        return "错误：未配置 SearXNG URL"
+    try:
+        import urllib.request
+        import urllib.parse
+        url = f"{base_url.rstrip('/')}/search?q={urllib.parse.quote(query)}&format=json&pageno=1"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0",
+        })
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        results = data.get("results", [])[:max_results]
+        return _format_results([
+            {"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", "")}
+            for r in results
+        ])
     except Exception as e:
         return f"搜索失败：{e}"
 
@@ -338,14 +499,20 @@ TOOLS_SCHEMA = [
 CONFIRM_REQUIRED = {"run_command", "write_file"}
 
 
-def dispatch(tool_name: str, args: dict, tavily_key: str = "", timeout: int = 30, stop_flag=None) -> str:
+def dispatch(tool_name: str, args: dict, search_config: dict = None, timeout: int = 30, stop_flag=None) -> str:
     """执行工具调用，返回字符串结果。"""
     if tool_name == "read_file":
         return read_file(args.get("path", ""))
     elif tool_name == "list_directory":
         return list_directory(args.get("path", ""))
     elif tool_name == "web_search":
-        return web_search(args.get("query", ""), args.get("max_results", 5), api_key=tavily_key)
+        sc = search_config or {}
+        return web_search(
+            args.get("query", ""), args.get("max_results", 5),
+            engine=sc.get("engine", "tavily"),
+            api_keys=sc,
+            fallback=sc.get("fallback", True),
+        )
     elif tool_name == "web_read":
         return web_read(args.get("url", ""))
     elif tool_name == "run_command":

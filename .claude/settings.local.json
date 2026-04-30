@@ -20,7 +20,8 @@
       "WebFetch(domain:chat-deep.ai)",
       "Bash(python3 -c ':*)",
       "Bash(python:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "WebFetch(domain:www.morphllm.com)"
     ]
   }
 }

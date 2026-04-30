@@ -34,7 +34,7 @@ class Agent:
         base_url: str,
         model: str,
         system_prompt: str = "You are a helpful assistant.",
-        tavily_key: str = "",
+        search_config: dict = None,
         command_safety: str = "confirm",
         command_timeout: int = 30,
         todo_manager: Optional[TodoManager] = None,
@@ -46,7 +46,7 @@ class Agent:
     ):
         self.model = model
         self.system_prompt = system_prompt
-        self.tavily_key = tavily_key
+        self.search_config = search_config or {}
         self.command_safety = command_safety
         self.command_timeout = command_timeout
         self.thinking = thinking
@@ -404,12 +404,12 @@ class Agent:
                                 result = f"工具 {tool_name} 已被禁用"
                             elif self.command_safety == "confirm":
                                 allowed = on_confirm(tool_name, args)
-                                result = (dispatch(tool_name, args, self.tavily_key, self.command_timeout, self._stop_flag)
+                                result = (dispatch(tool_name, args, self.search_config, self.command_timeout, self._stop_flag)
                                           if allowed else f"用户拒绝执行工具：{tool_name}")
                             else:
-                                result = dispatch(tool_name, args, self.tavily_key, self.command_timeout, self._stop_flag)
+                                result = dispatch(tool_name, args, self.search_config, self.command_timeout, self._stop_flag)
                         else:
-                            result = dispatch(tool_name, args, self.tavily_key, self.command_timeout, self._stop_flag)
+                            result = dispatch(tool_name, args, self.search_config, self.command_timeout, self._stop_flag)
 
                     if tool_name == "todo_write":
                         used_todo = True

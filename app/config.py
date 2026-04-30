@@ -63,6 +63,12 @@ DEFAULT_CONFIG = {
     "model_configs": DEFAULT_MODEL_CONFIGS,
     "active_model_config": "DeepSeek 官方",
     "tavily_api_key": "",
+    "search_engine": "tavily",         # tavily | duckduckgo | bing | google | searxng
+    "search_fallback": True,           # 失败时自动降级到其他引擎
+    "bing_api_key": "",
+    "google_api_key": "",
+    "google_cx": "",                   # Google Custom Search Engine ID
+    "searxng_url": "",                 # 如 http://localhost:8888
     "command_safety": "confirm",   # confirm | auto | disabled
     "command_timeout": 30,
     "max_rounds": 50,

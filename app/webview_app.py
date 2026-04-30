@@ -126,6 +126,18 @@ class API:
     def open_url(self, url: str) -> None:
         webbrowser.open(url)
 
+    def _build_search_config(self) -> dict:
+        """Assemble search config dict from self._config for Agent."""
+        return {
+            "engine": self._config.get("search_engine", "tavily"),
+            "fallback": self._config.get("search_fallback", True),
+            "tavily_api_key": self._config.get("tavily_api_key", ""),
+            "bing_api_key": self._config.get("bing_api_key", ""),
+            "google_api_key": self._config.get("google_api_key", ""),
+            "google_cx": self._config.get("google_cx", ""),
+            "searxng_url": self._config.get("searxng_url", ""),
+        }
+
     # ── Skills ────────────────────────────────────────────────────
     def list_skills(self) -> list:
         return skill_list()
@@ -294,7 +306,7 @@ class API:
             base_url=mc.get('base_url', ''),
             model=mc.get('model', ''),
             system_prompt=mc.get('system_prompt', 'You are a helpful assistant.'),
-            tavily_key=self._config.get('tavily_api_key', ''),
+            search_config=self._build_search_config(),
             command_safety=self._config.get('command_safety', 'confirm'),
             command_timeout=self._config.get('command_timeout', 30),
             max_rounds=self._config.get('max_rounds', 50),
@@ -334,7 +346,7 @@ class API:
             base_url=mc.get('base_url', ''),
             model=mc.get('model', ''),
             system_prompt=mc.get('system_prompt', 'You are a helpful assistant.'),
-            tavily_key=self._config.get('tavily_api_key', ''),
+            search_config=self._build_search_config(),
             command_safety=self._config.get('command_safety', 'confirm'),
             command_timeout=self._config.get('command_timeout', 30),
             max_rounds=self._config.get('max_rounds', 50),

@@ -130,7 +130,23 @@
       </div>
       <!-- 工具设置 -->
       <div class="tab-panel" id="tab-tools">
+        <label>搜索引擎
+          <select id="search-engine">
+            <option value="tavily">Tavily</option>
+            <option value="duckduckgo">DuckDuckGo（免费）</option>
+            <option value="bing">Bing Search</option>
+            <option value="google">Google Custom Search</option>
+            <option value="searxng">SearXNG（自建）</option>
+          </select>
+        </label>
+        <label class="checkbox-label"><input type="checkbox" id="search-fallback" checked> 搜索失败时自动降级到其他引擎</label>
         <label>Tavily API Key<input type="password" id="tavily-key" placeholder="tvly-..."></label>
+        <label>Bing API Key<input type="password" id="bing-key" placeholder="Azure key..."></label>
+        <label>Google API Key<input type="password" id="google-key" placeholder="AIza..."></label>
+        <label>Google CX ID<input type="text" id="google-cx" placeholder="搜索引擎 ID"></label>
+        <label>SearXNG URL<input type="text" id="searxng-url" placeholder="http://localhost:8888"></label>
+        <p class="hint">DuckDuckGo 无需配置，可直接使用。开启自动降级后，首选引擎失败会依次尝试其他已配置的引擎，DuckDuckGo 作为最终兜底。</p>
+        <hr style="border-color:var(--border);margin:12px 0">
         <label>命令执行安全
           <select id="cmd-safety">
             <option value="confirm">confirm（每次确认）</option>
