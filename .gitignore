@@ -38,6 +38,7 @@ tests/*
 !tests/test_browser_tools.py
 !tests/test_theme_contrast.py
 !tests/test_frontend_code_features.py
+!tests/frontend_clipboard.cjs
 *_generated_*.png
 矩阵运算*.md
 newton_bisection.tex

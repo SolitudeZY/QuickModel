@@ -1,4 +1,6 @@
 import unittest
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -14,15 +16,21 @@ class FrontendCodeFeatureTests(unittest.TestCase):
         self.assertIn('data-mermaid-action="download-svg"', RENDER)
         self.assertIn('hydrateMermaid', RENDER)
 
-    def test_code_copy_exposes_markdown_and_word_formats(self):
-        self.assertIn("'text/markdown'", RENDER)
-        self.assertIn("'text/html'", RENDER)
-        self.assertIn("event.clipboardData.setData('text/markdown'", RENDER)
-        self.assertIn("event.clipboardData.setData('text/html'", RENDER)
-
-    def test_copy_selection_stays_inside_code_body(self):
-        self.assertIn("selection.anchorNode?.parentElement?.closest('pre code')", RENDER)
-        self.assertIn("selection.focusNode?.parentElement?.closest('pre code')", RENDER)
+    def test_browser_clipboard_interactions(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Browser regression requires Node.js and Playwright")
+        probe = subprocess.run(
+            [node, "-e", "require.resolve('playwright')"], cwd=ROOT,
+            capture_output=True, timeout=15,
+        )
+        if probe.returncode:
+            self.skipTest("Set NODE_PATH to a Node installation with Playwright")
+        result = subprocess.run(
+            [node, str(ROOT / "tests" / "frontend_clipboard.cjs")], cwd=ROOT,
+            capture_output=True, text=True, encoding="utf-8", timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

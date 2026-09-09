@@ -67,6 +67,8 @@ vendor/* → core.js → render.js → drag.js → dialogs.js → settings.js �
 
 - `core.js`（~38 行）：`state`、`$`、DOM 引用（convList/chatMessages/msgInput/…）、`_convColors`/`_randomConvColor`。**必须最先加载**——其它文件顶层的 `$('btn-…').addEventListener` 在 load 时即执行，依赖 `$`/DOM 引用。
 - `render.js`：marked/KaTeX 配置、`renderMarkdown`、`renderLatexInDom`、`copyCode`、`escapeHtml`、`scrollToBottom`。
+  - 代码复制：`复制代码` 的 plain text 是原始代码；`复制格式` 的 plain text 是 Markdown 围栏代码，HTML 是不含围栏的 `<pre><code>`，供 Word 保留格式粘贴。不能向异步 Clipboard API 写 `text/markdown`（Chromium 会拒绝整次写入）。受限 WebView 回退到原生 copy 事件；只在确认写入后显示成功。拖选跨正文/代码时清除工具栏 DOM，保留所选代码和换行。目标编辑器最终选择哪种格式由其粘贴策略决定，Word 的“仅保留文本”会使用 plain text。
+  - 浏览器回归：`node tests/frontend_clipboard.cjs`（Node 环境需可解析 `playwright`，默认使用本机 Edge，可用 `QM_TEST_BROWSER` 改 channel）；验证实际系统剪贴板、失败回退、部分选择和主题计算样式。`QM_QA_SCREENSHOT_DIR` 可选，指向仓库外的截图目录。
 - `drag.js`：侧边栏会话手动拖拽引擎（`_drag` 状态机、`_handleConvDrop`/`_handleHeaderDrop` 等）。
 - `dialogs.js`：重命名/命令确认/ask_user_question/计划批准/图片灯箱/文件 diff 模态框，及各自顶层按钮绑定。
 - `settings.js`：设置面板/命令白名单/更新检查/云同步/模型配置，及顶层按钮绑定。

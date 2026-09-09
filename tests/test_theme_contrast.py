@@ -18,15 +18,15 @@ class DuskThemeContrastTests(unittest.TestCase):
     def setUpClass(cls):
         cls.css = STYLE_PATH.read_text(encoding="utf-8")
 
-    def test_clear_dusk_sidebar_uses_dark_high_contrast_text(self):
+    def test_clear_dusk_sidebar_uses_light_text_with_dark_shadow(self):
         body = _rule_body(
             self.css,
             '[data-period="dusk"][data-starfield="on"] #conv-list li',
         )
-        self.assertIn("color: #332522", body)
-        self.assertIn("text-shadow:", body)
+        self.assertIn("color: #fff8f4", body)
+        self.assertIn("rgba(20, 10, 14, 0.88)", body)
 
-    def test_rainy_dusk_sidebar_uses_light_text_only_for_rain_and_thunder(self):
+    def test_rainy_dusk_sidebar_keeps_light_text(self):
         rain_selector = (
             '[data-period="dusk"][data-starfield="on"][data-weather="rain"] #conv-list li,\n'
             '[data-period="dusk"][data-starfield="on"][data-weather="thunder"] #conv-list li'
