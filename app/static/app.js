@@ -1396,6 +1396,7 @@ function addAssistantBubble(content) {
   div.className = 'bubble bubble-assistant';
   div.innerHTML = `<div class="bubble-label">Assistant</div><div class="bubble-content">${renderMarkdown(content)}</div>`;
   chatMessages.appendChild(div);
+  hydrateMermaid(div.querySelector('.bubble-content'));
   _hydrateImgThumbs(div);
   scrollToBottom();
   return div;
@@ -1608,7 +1609,9 @@ window.Chat = {
     if (!_streamContent && token) _resetToolStreak();
     _streamContent += token;
     if (_streamBubble) {
-      _streamBubble.querySelector('.bubble-content').innerHTML = renderMarkdown(_streamContent);
+      const contentEl = _streamBubble.querySelector('.bubble-content');
+      contentEl.innerHTML = renderMarkdown(_streamContent);
+      hydrateMermaid(contentEl);
       if (state.currentConvId === _streamingConvId) scrollToBottom();
     }
   },
