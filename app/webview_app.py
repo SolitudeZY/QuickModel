@@ -1565,8 +1565,17 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 if not dl_path.exists():
                     _log(f"setup 不存在: {dl_path}")
                     return {"error": f"安装包不存在: {dl_path}"}
+                # 先销毁 WebView 窗口，再启动安装器。之前先启动 Inno 再 destroy，
+                # 可能在 WebView2 子进程释放 vcruntime140.dll 前开始复制。
+                if self._window:
+                    try:
+                        self._window.destroy()
+                        _log("已请求关闭窗口，等待 WebView2 释放文件句柄")
+                    except Exception as close_error:
+                        _log(f"关闭窗口时出现异常（继续交给安装器处理）: {close_error}")
+                time.sleep(3.0)
                 args = [str(dl_path), "/SILENT", "/CLOSEAPPLICATIONS", "/NORESTART"]
-                _log(f"即将运行安装程序: {args}")
+                _log(f"等待完成，即将运行安装程序: {args}")
                 try:
                     proc = subprocess.Popen(args, creationflags=0x00000008)  # DETACHED_PROCESS
                     _log(f"安装程序已启动 pid={proc.pid}")
@@ -1574,9 +1583,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                     _log(f"启动安装程序失败: {pe}")
                     return {"error": f"启动安装程序失败: {pe}"}
                 # 主动退出本进程，让安装程序能覆盖文件（installer 的 CloseApplications 也会兜底关它）
-                _log("即将退出当前进程，交给安装程序覆盖并重启")
-                if self._window:
-                    self._window.destroy()
+                _log("安装程序已接管，当前进程即将退出")
                 return {"ok": True}
             else:
                 # macOS: shell script。frozen .app 时 sys.executable 是

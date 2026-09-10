@@ -24,6 +24,8 @@ WizardStyle=modern
 ; 安装/更新时自动关闭正在运行的旧 QuickModel，避免文件占用
 CloseApplications=yes
 RestartApplications=no
+; 仅让 Inno 的重启管理器关注本应用，避免误关闭其他 WebView2 应用。
+CloseApplicationsFilter=QuickModel.exe
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl"
