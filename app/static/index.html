@@ -275,6 +275,14 @@
               <button id="btn-mc-models" class="btn-secondary">读取模型列表</button>
             </div>
             <div class="model-list-box" id="mc-models-box"></div>
+            <label>图片理解方式
+              <select id="mc-image-input-mode">
+                <option value="auto">自动（已确认的官方模型）</option>
+                <option value="native">主模型直接看图</option>
+                <option value="external">独立视觉模型</option>
+              </select>
+            </label>
+            <p class="hint">自动模式支持 DeepSeek 官方 Flash 和百炼 deepseek-v4.1-flash。其他多模态模型可选“主模型直接看图”，将图片直接发送给当前模型；独立视觉模型在“图片工具”中配置。</p>
             <div class="form-row context-size-row">
               <label style="flex:1">上下文长度
                 <div class="form-row">

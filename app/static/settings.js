@@ -1053,6 +1053,7 @@ function selectMc(idx) {
   $('mc-key').value = mc.api_key || '';
   $('mc-url').value = mc.base_url || '';
   $('mc-model').value = mc.model || '';
+  $('mc-image-input-mode').value = mc.image_input_mode || 'auto';
   $('mc-system').value = mc.system_prompt || '';
   syncPromptTemplateSelection();
   updateModelApiTypeUI();
@@ -1086,6 +1087,7 @@ function saveCurrentMc() {
   mc.api_key = $('mc-key').value.trim();
   mc.base_url = $('mc-url').value.trim();
   mc.model = $('mc-model').value.trim();
+  mc.image_input_mode = $('mc-image-input-mode').value;
   mc.system_prompt = $('mc-system').value.trim();
   // 上下文长度和压缩阈值
   const ctxVal = parseFloat($('mc-context-length').value) || 600;

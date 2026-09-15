@@ -1855,13 +1855,31 @@ btnStop.addEventListener('click', () => window.pywebview.api.stop_generation());
 
 // ── Undo last message ────────────────────────────────────────────
 let _undoUsed = false;
+function restoreUndoneInput(value) {
+  const restored = typeof value === 'string' ? { text: value, files: [] } : value;
+  msgInput.value = restored.text || '';
+  clearFileChips();
+  for (const file of restored.files || []) {
+    const entry = { name: file.name, path: file.path, content: file.content || '', loading: false };
+    state.attachedFiles.push(entry);
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    chip.innerHTML = `<span>🖼 ${escapeHtml(entry.name)}</span><span class="chip-status"> 已恢复</span><button title="移除">✕</button>`;
+    chip.querySelector('button').addEventListener('click', () => {
+      state.attachedFiles = state.attachedFiles.filter(f => f !== entry);
+      chip.remove();
+    });
+    fileChips.appendChild(chip);
+  }
+}
+
 $('btn-undo').addEventListener('click', async () => {
   if (!state.currentConvId) return;
   if (_undoUsed) { return; }
   _undoUsed = true;
   $('btn-undo').disabled = true;
-  const text = await window.pywebview.api.undo_last_message(state.currentConvId);
-  if (text === null || text === undefined) {
+  const undone = await window.pywebview.api.undo_last_message(state.currentConvId);
+  if (undone === null || undone === undefined) {
     _undoUsed = false;
     $('btn-undo').disabled = false;
     return;
@@ -1872,8 +1890,8 @@ $('btn-undo').addEventListener('click', async () => {
     loadHistory(conv.messages || []);
     Chat.updateFileOps(conv.file_ops || []);
   }
-  // Put user text back in input
-  msgInput.value = text;
+  // Restore structured attachments, not just their display path markers.
+  restoreUndoneInput(undone);
   msgInput.focus();
   setRunning(false);
   _streamBubble = null;
@@ -1886,8 +1904,8 @@ $('btn-undo').addEventListener('click', async () => {
 $('btn-retry').addEventListener('click', async () => {
   if (!state.currentConvId || state.running) return;
   // Undo last exchange, then immediately resend
-  const text = await window.pywebview.api.undo_last_message(state.currentConvId);
-  if (text === null || text === undefined) return;
+  const undone = await window.pywebview.api.undo_last_message(state.currentConvId);
+  if (undone === null || undone === undefined) return;
   // Reload conversation
   const conv = await window.pywebview.api.open_conversation(state.currentConvId);
   if (conv) {
@@ -1898,14 +1916,9 @@ $('btn-retry').addEventListener('click', async () => {
   _streamContent = '';
   _streamingConvId = null;
   _streamNodes = [];
-  // Resend
-  addUserBubble(text);
-  startAssistantStream();
-  scrollToBottom(true);
-  setRunning(true);
-  _undoUsed = false;
-  $('btn-undo').disabled = false;
-  await window.pywebview.api.send_message(state.currentConvId, text, []);
+  // Use the normal send path so image attachments survive retry.
+  restoreUndoneInput(undone);
+  await sendMessage();
 });
 
 // ── Model debate ─────────────────────────────────────────────────
@@ -1982,6 +1995,10 @@ async function sendMessage() {
   if (state.running) return;
   const text = msgInput.value.trim();
   if (!text && state.attachedFiles.length === 0) return;
+  if (state.attachedFiles.some(f => f.loading || !f.path)) {
+    addNoticeBubble('请等待附件上传完成；上传失败的附件请移除后重新添加。');
+    return;
+  }
   const isHomeVisible = !$('home-view').classList.contains('hidden');
   if (isHomeVisible || !state.currentConvId) await startConvWithProject('');
 
@@ -2220,7 +2237,7 @@ async function addFileChip(file) {
   chip.innerHTML = `<span>${icon} ${escapeHtml(name)}</span><span class="chip-status"> ⏳</span><button title="移除">✕</button>`;
   fileChips.appendChild(chip);
 
-  const entry = { name, path: '', content: '' };
+  const entry = { name, path: '', content: '', loading: true };
   state.attachedFiles.push(entry);
 
   chip.querySelector('button').addEventListener('click', () => {
@@ -2229,19 +2246,24 @@ async function addFileChip(file) {
   });
 
   // Read as base64, save via Python to get a stable local path with unique suffix
-  const base64 = await readFileAsBase64(file);
-  const localPath = await window.pywebview.api.save_uploaded_file(name, base64);
-  entry.path = localPath;
-  chip.querySelector('.chip-status').textContent = '';
-
-  if (isImg) {
-    // 不再在附加时预生成通用描述；改由主模型在需要时按问题调用 analyze_image。
-    // 这里仅标记图片已就绪。
-    chip.querySelector('.chip-status').textContent = ' 🖼';
-  } else {
-    const content = await window.pywebview.api.read_file_content(localPath);
-    entry.content = content;
-    chip.querySelector('.chip-status').textContent = content ? ' ✓' : ' ⚠';
+  try {
+    const base64 = await readFileAsBase64(file);
+    const localPath = await window.pywebview.api.save_uploaded_file(name, base64);
+    if (!localPath) throw new Error('附件上传失败');
+    entry.path = localPath;
+    if (isImg) {
+      // 发送时后端按模型能力选择直传或独立视觉工具。
+      chip.querySelector('.chip-status').textContent = ' 🖼';
+    } else {
+      const content = await window.pywebview.api.read_file_content(localPath);
+      entry.content = content;
+      chip.querySelector('.chip-status').textContent = content ? ' ✓' : ' ⚠';
+    }
+  } catch (error) {
+    entry.path = '';
+    chip.querySelector('.chip-status').textContent = ' 上传失败，请重新添加';
+  } finally {
+    entry.loading = false;
   }
 }
 

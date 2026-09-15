@@ -1020,10 +1020,16 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             self._start_agent(conv)
             return
 
-        # Build user message content
-        # Images: use vision model to get text description
-        # Other files: inject content as text
+        mc = get_active_model_config(self._config)
+        if not mc:
+            self._js('Chat.showError("未配置模型，请在设置中添加模型配置")')
+            return
+
+        # Persist lightweight, immutable image references. Adapters expand them
+        # only at the request boundary, using the selected model's capabilities.
+        from app.multimodal import snapshot_image, ImageAttachmentError
         parts = [text] if text else []
+        image_refs = []
         for f in files:
             name = f.get('name', '')
             path = f.get('path', '')
@@ -1031,18 +1037,21 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             ext = Path(name).suffix.lower().lstrip('.')
             is_img = ext in {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'}
             if is_img:
-                # 不再发送时预生成"通用描述"，而是把图片路径告知主模型。
-                # 文字提取走本地 OCR；确需视觉语义时才调用远端视觉模型。
                 if path:
-                    abs_path = str(Path(path).expanduser().resolve())
-                    parts.append(
-                        f"[图片: {name} 路径: {abs_path}]\n"
-                        "（若需读取图片文字，优先使用本地 ocr_image；只有需要理解场景、"
-                        "布局、趋势或空间关系时，才使用 analyze_image 并根据我的问题撰写针对性的 question。）"
-                    )
+                    try:
+                        ref = snapshot_image(path, name=name)
+                    except (ImageAttachmentError, OSError) as exc:
+                        self._js(f'Chat.showError({json.dumps(str(exc), ensure_ascii=False)})')
+                        return
+                    image_refs.append(ref)
+                    parts.append(f"[图片: {name} 路径: {ref['path']}]")
                 elif content:
-                    # 无路径（如纯 base64 来源）时回退到已有描述
+                    # Legacy text-only descriptions remain text, never pretend
+                    # they contain image bytes.
                     parts.append(f"[图片: {name}]\n{content}")
+                else:
+                    self._js('Chat.showError("图片尚未上传完成，请等待附件就绪后重试")')
+                    return
             else:
                 abs_path = str(Path(path).expanduser().resolve()) if path else ''
                 marker = f"[附件: {name} 路径: {abs_path}]" if abs_path else f"[附件: {name}]"
@@ -1060,16 +1069,13 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         full_text = '\n\n'.join(parts)
 
         user_msg = {'role': 'user', 'content': full_text}
+        if image_refs:
+            user_msg['images'] = image_refs
         conv['messages'].append(user_msg)
 
         # Auto-title on first message
         if len(conv['messages']) == 1:
             auto_title_from_message(conv, full_text)
-
-        mc = get_active_model_config(self._config)
-        if not mc:
-            self._js('Chat.showError("未配置模型，请在设置中添加模型配置")')
-            return
 
         self._active_model_name = mc.get('model', '')
         self._active_model_config_name = mc.get('name', '')
@@ -1181,8 +1187,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         self._debate_stop = True
         self._debate_stop_event.set()
 
-    def undo_last_message(self, conv_id: str) -> Optional[str]:
-        """Remove the last user+assistant exchange, return the user's text."""
+    def undo_last_message(self, conv_id: str):
+        """Undo a real user turn, preserving image attachments for resend."""
         if self._running:
             self._agent.stop()
             import time
@@ -1191,16 +1197,30 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         if not conv or not conv.get('messages'):
             return None
         messages = conv['messages']
-        # Remove trailing assistant message(s) and tool messages
-        while messages and messages[-1]['role'] in ('assistant', 'tool'):
-            messages.pop()
         conv.pop('provider_state', None)
-        # Now remove the last user message and return its content
-        if messages and messages[-1]['role'] == 'user':
-            user_msg = messages.pop()
+        for index in range(len(messages) - 1, -1, -1):
+            user_msg = messages[index]
+            if user_msg.get('role') != 'user':
+                continue
+            # Compatibility with snapshots written before image_origin existed.
+            is_tool_image = user_msg.get('image_origin') == 'tool' or (
+                user_msg.get('images') and str(user_msg.get('content', '')).startswith('工具载入的图片（')
+                and index > 0 and messages[index - 1].get('role') == 'tool'
+            )
+            if is_tool_image:
+                continue
+            del messages[index:]
             self._save_conversation(conv)
             self._running = False
-            return user_msg.get('content', '')
+            text = user_msg.get('content', '')
+            images = user_msg.get('images', [])
+            if not images:
+                return text
+            for ref in images:
+                text = text.replace(f"[图片: {ref['name']} 路径: {ref['path']}]", '')
+            return {'text': text.strip(), 'files': [
+                {'name': ref['name'], 'path': ref['path'], 'content': ''} for ref in images
+            ]}
         self._save_conversation(conv)
         self._running = False
         return None

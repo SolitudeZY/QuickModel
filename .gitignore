@@ -30,6 +30,7 @@ tests/*
 !tests/test_model_callers.py
 !tests/test_model_config.py
 !tests/test_model_protocol.py
+!tests/test_multimodal.py
 !tests/test_responses_state.py
 !tests/test_retrieval.py
 !tests/test_vision.py

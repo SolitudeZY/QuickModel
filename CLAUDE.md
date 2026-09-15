@@ -52,6 +52,7 @@
 - `app/tools.py` — 工具实现 + `TOOLS_SCHEMA` + `dispatch` 分发
 - `app/retrieval.py` — 网页/远程文档解析、PDF 页面渲染、图片提取与 OCR 联动
 - `app/vision.py` — 视觉模型调用（`describe_image`）
+- `app/multimodal.py` — 原生图片附件快照、请求转换、大小校验和图片 Token 估算
 - `app/config.py` — 配置默认值与读写
 - `app/static/` — 全部前端（HTML/CSS/JS）；UI 改动都在这里。**JS 已按功能拆分为多个普通 `<script>`（无打包器/模块），加载顺序见下「前端 JS 模块拆分」**。
 - `app/gui.py` — **遗留** CustomTkinter 界面，当前未被任何地方 import，pywebview 入口不走它。改动前先确认是否仍在引用。
@@ -107,18 +108,28 @@ vendor/* → core.js → render.js → drag.js → dialogs.js → settings.js �
 - **缓存破坏/`patch_http_root`** 在所有平台无害运行（bottle 为 pywebview 跨平台共用）。
 - 工具配置通过 `dispatch(tool_name, args, search_config=..., vision_config=...)` 的 dict 通道传入，不要在工具函数里直接读全局 config。
 - `Agent.__init__` 接收 `search_config` / `vision_config`；`webview_app.py` 用 `_build_search_config()` / `_build_vision_config()` 组装。两处 Agent 构造（`send_message`、`_start_agent`）都要保持同步。
-- 缓存优化：大块数据（如图片 base64）**绝不进入主模型上下文**；`TOOLS_SCHEMA`、system prompt 作为稳定前缀以命中 prompt cache。
+- 缓存优化：图片 Base64 **不进入持久会话、文本摘要或工具返回文本**。原生多模态模型仅在请求边界通过图片内容块接收编码；纯文本模型继续使用独立视觉工具。`TOOLS_SCHEMA`、system prompt 作为稳定前缀以命中 prompt cache。
 - **prompt cache 前缀稳定铁律（重要）**：DeepSeek 等 prompt cache 从头逐 token 比对前缀，遇到第一个不同 token 即从该点起全部 miss 重算。因此**绝不就地改写任何已发送过的历史消息内容**——一旦某条消息以某形态发给过 API，之后必须保持该形态。压缩历史只能用 `auto_compact`（超阈值时一次性折叠中段为摘要、保留 system 头 + 近期尾，低频、一次性失效后前缀重新稳定）。
   - ⚠ **已移除 microcompact**（曾在 `_manage_context` 每轮调用）：它按"距末尾 N 条"的滑动窗口就地把窗口外旧工具结果改写成 `[已压缩]`，但窗口边界随消息增长右移，导致位于前缀中间的历史消息被反复改写 → 每次都从该点截断缓存前缀。表现为**工具调用越多、缓存命中率越低**。教训：任何"随轮次移动的就地改写"都与 prompt cache 冲突，宁可多花上下文 token 也要保前缀稳定（DeepSeek 缓存 token 仅为 miss 的约 1/10）。
   - **`auto_compact` 实现要点（`advanced_tools.py`，v1.7.4 大改，修复"压缩后失忆"）**：超 `compact_threshold` 时把 `system 头 + 中段摘要 + 近期尾` 重组；近期尾最多保留 15 条，并按阈值的 token 预算动态收缩，避免最近的大工具结果独占上下文、导致无中段可压缩。中段**分块摘要**（每块 ≤60000 字符逐块总结，多块再合并）——⚠ 旧实现是 `json.dumps(middle)[-80000:]` 只取尾部 8 万字符喂摘要，**中段一长前半段直接丢弃 → 失忆主因**（DeepSeek 爱"说一句→调几次工具"，工具结果堆满中段极易触发）。摘要 prompt 结构化、强制保留可继续工作的具体事实（文件路径/函数名/变量名原样、需求约束、决策、待办、工具关键结果）。**摘要失败必须 `return messages` 退化为不压缩**，绝不用错误串替换整个中段；自动压缩开始/成功/失败须经 Notice 告知用户，整个摘要流程有 120 秒硬超时且响应停止按钮，同一次 Agent run 失败后不重复尝试。手动压缩失败时只能更新尚未发送的工具占位结果，绝不能 `clear()` 原消息。摘要走便宜模型：`agent._summary_model_config()` 优先取配置里名字含 `flash` 的模型，回退主模型。压缩结果经 `_on_done` 持久化回会话，下次从压缩后版本继续。
 
-## 图片理解（针对性分析，工具化）
+## 图片理解（原生多模态 + 独立视觉工具）
 
-设计：**不在发送时预生成通用描述**，而是发送图片时只附**绝对路径**，由主模型按当前问题调用 `analyze_image(path, question)` 工具做针对性分析。
+**不在发送时预生成通用描述**。每个模型配置 `image_input_mode=auto|native|external`，设置页对应“自动 / 主模型直接看图 / 独立视觉模型”。`config.supports_native_images` 统一判定：自动启用官方 `api.deepseek.com` 的 `deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`，以及 `dashscope.aliyuncs.com` 的 `deepseek-v4.1-flash`；V4 Pro 和百炼 `deepseek-v4-flash-0731` 不自动启用。中转及其他多模态模型需手动选 native，未知模型保持原工具流程。新配置默认的 Flash 名改为 `deepseek-flash`，不改写已有用户模型名。
 
-- `webview_app.py` `send_message`：图片附 `[图片: 名称 路径: 绝对路径]`；文字提取提示主模型优先用 `ocr_image`，视觉语义才用 `analyze_image`。
+- `webview_app.py send_message`：图片先由 `multimodal.snapshot_image` 验证实际格式并保存不可变快照到 `uploads/native_images/<sha256>.<ext>`，`content` 保持字符串和 `[图片: 名称 路径: 快照绝对路径]`，另存 `images=[{path,name,mime_type,sha256,width,height}]`。前端仍用文本标记显示卡片，不接触 API Base64。附件上传未完成时禁止发送；坏图或缺图明确报错。
+- `ModelAdapter.stream_round` 在临时请求副本中展开 images：Chat 为 `image_url`，Responses 为 `input_image`，Anthropic 为 `image/source`。原始会话不变；重启/追问重新读取同一快照并验证哈希。图片缺失/被修改时停止请求并提示重新附加，绝不静默丢图或改调独立模型。切换为 external 后只给文字、路径和分析工具提示，不改写历史；模式变化也会使 Responses 状态指纹失效。
+- native 模式提供 `view_image(path)`，隐藏 `analyze_image`，OCR 按需使用。`tools.view_image` 经 dispatch 返回内部 `ImageToolResult`，由 Agent 将同轮全部工具结果落入历史后再追加携带 images 的 user 消息。兼容历史中遗留的 analyze_image 调用：native 模式将其路由到本地载图，不请求独立模型。external 模式提供 analyze_image，不提供 view_image。子代理目前仍使用原有独立的文本工具子集。
+- 上传图片后，Agent 用 Notice 显示实际图片模式及当前模型；自动模式未命中支持列表时明确说明原因。原生模式拦截历史 analyze_image 调用后，实时工具卡片显示实际执行的 view_image，协议历史仍保留模型原始调用名与 ID。不要仅凭历史工具名判断是否调用了独立模型，应结合图片模式提示及工具结果（本地“图片已载入”或独立模型的分析正文）。
+- **直接发送，不做随机字符门禁**：native 模式（含 auto 命中原生支持列表）直接发送用户或 view_image 载入的真实图片，不额外调用模型识别临时测试图。随机字符读错、回答格式不同或输出被截断都不能证明接口不支持图片，不得据此拦截请求。保留本地图片完整性/大小校验及服务端错误提示；图片请求失败不能丢图后静默改发纯文字。
+- **诊断样本（2026-09-15）**：百炼 `deepseek-v4-flash-0731` 发送 image_url 后返回 NO_IMAGE，带图/无图输入用量同为111；同一百炼地址的 `deepseek-v4.1-flash` 与 DeepSeek 官方 `deepseek-flash` 曾正确识别对照图片。V4.1 后续也出现随机字符识别不匹配，说明这类样本不能作为能力开关。“主模型直接看图”控制请求格式，真实识别效果需用实际图片验证。
+- **撤回/重试**：工具图片 user 消息标记 `image_origin=tool`（协议层移除此内部字段）。撤回定位真实用户消息并删除整个后续工具轮次；返回 `{text,files}` 恢复原始图片，纯文本会话兼容旧字符串返回。前端 `restoreUndoneInput` 重建附件卡片，重试复用 `sendMessage`，不能把图片退化为仅含路径的文字再发送。旧工具图片消息通过固定前缀、图片引用及前一条 tool 消息兼容识别。
+- 应用当前内联限制：单图 32 MiB、单边 8192 像素、每个请求至多 600 图；15 图及以上单边上限 4096 像素；包含文字和工具的请求体上限 48 MiB。JPEG/PNG/GIF/WebP 按实际字节识别，BMP 在建立快照时转 PNG。其他服务可能有更严格限制，以其返回为准。Files API 上传缓存尚未实现。
+- Token 估算不按 Base64 字符计数：文本估算 + 每图 1024 Token 预算（参考 DeepSeek 上限，其他厂商仅作粗估），实际计费优先使用服务端 usage。摘要不展开图片编码；压缩掉的中段图片路径以确定性列表保留在摘要旁，视觉结论随摘要保留，需要复查再用 view_image。不定期删除历史图片来“省 Token”，以免破坏缓存前缀。
+- 旧会话只有路径标记时不自动解析标记加载本地文件：原生模型需调用 view_image 或用户重新附图。会话云同步仍不传输图片文件，换机器需复制快照或重新附图。现有附件卡片读取和文件夹同步机制不在本次扩展范围内。
+- 本地回归：`D:/miniconda/envs/ai_api/python.exe -m unittest tests.test_multimodal tests.test_model_protocol tests.test_agent_protocols tests.test_model_config tests.test_model_callers tests.test_responses_state`。真实 API 和安装包运行需单独验证。
 - `tools.py` `analyze_image(path, question, vision_config)`：把贴合问题的 `question` 透传给 `describe_image`；带路径/格式校验，无 key 优雅降级。视觉请求使用可配置的 `vision_timeout`（10-300 秒，默认 90）且关闭 SDK 自动重试，避免慢请求叠加等待。
-- **视觉模型无状态、无记忆（关键约定）**：每次 `describe_image` 都是独立单次 `chat.completions.create`，只含当轮 user 消息（图 + prompt），不带对话历史、调用间互不相通。上下文由**主模型**持有，视觉模型职责仅是"就这一个 question 看这一张图"。因此：①`analyze_image` 的 schema 引导主模型把**对话背景补进 question**（背景+聚焦区域+具体问题），不要只问"描述图片"；②同一张图多个问题应**合并进一次调用**（question 内 ①②③ 编号），而非拆成多次失忆调用——也省 token（图片 base64 大，且按缓存约定绝不进主上下文）。
+- **独立视觉模型无状态、无记忆**：external 模式下每次 `describe_image` 都是独立单次 `chat.completions.create`，只含当轮 user 消息（图 + prompt），不带对话历史。`analyze_image` 的 question 应包含背景、聚焦区域、具体问题；同图多个问题尽量合并。native 模式由主模型直接结合会话理解图片。
 - **反幻觉约束**：`describe_image` 给视觉模型加了 system prompt，强制只报实际可见内容、区分观察与推测、文字/数值逐字符读取、看不清就说不清、宁可保守少答。`webview_app.py`/`gui.py` 的 `describe_image` 调用自动继承此约束。
 - `app.js`：拖拽图片后不再预调 `describe_image`，仅标记 🖼。
 - vision 配置：`vision_api_key` / `vision_base_url`（默认 dashscope compatible-mode）/ `vision_model`（默认 qwen-vl-max）。
@@ -218,7 +229,7 @@ vendor/* → core.js → render.js → drag.js → dialogs.js → settings.js �
 
 ## 上传文件回显（附件卡片）
 
-用户消息里的附件以**文本标记**形式存在消息内容中，前端解析后渲染成卡片——不额外存储，刷新/重开对话自动恢复。
+用户消息里的附件以**文本标记**形式显示，前端解析后渲染成卡片，刷新/重开对话自动恢复。原生多模态图片另外保存 `images` 结构化快照引用供后端请求使用，前端仍只渲染字符串 content。
 
 - 标记格式（`webview_app.py` `send_message` 生成）：`[图片: 名称 路径: 绝对路径]` / `[附件: 名称 路径: 绝对路径]`。无路径时回退为 `[图片: 名称]` / `[附件: 名称]`（兼容旧数据）。
 - 前端 `app.js` `buildUserContent` 用正则解析两种标记：图片→缩略图卡片（点击 `openLightbox` 放大），文档→图标卡片（点击 `open_file_location` 在资源管理器定位 temp 文件）。其余文本原样显示。

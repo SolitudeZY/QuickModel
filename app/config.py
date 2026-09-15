@@ -40,6 +40,7 @@ MODEL_API_TYPE_FIELDS = {
 }
 
 MODEL_CONFIG_DEFAULTS = {
+    "image_input_mode": "auto",
     "api_type": "openai_chat",
     "api_protocol": "openai_chat",
     "provider_profile": "generic",
@@ -104,6 +105,8 @@ def normalize_model_config(model_config: dict) -> dict:
             normalized["provider_profile"] = infer_provider_profile(normalized)
         api_type = infer_model_api_type(normalized)
     normalized["api_type"] = api_type
+    image_mode = normalized.get("image_input_mode", "auto")
+    normalized["image_input_mode"] = image_mode if image_mode in ("auto", "native", "external") else "auto"
     protocol, profile, client_profile = MODEL_API_TYPE_FIELDS[api_type]
     normalized["api_protocol"] = protocol
     normalized["provider_profile"] = profile
@@ -125,6 +128,21 @@ def normalize_model_config(model_config: dict) -> dict:
     )
     normalized.pop("use_full_url", None)
     return normalized
+
+
+def supports_native_images(model_config: dict) -> bool:
+    """Only known official endpoints opt in automatically; proxies can opt in."""
+    mode = model_config.get("image_input_mode", "auto")
+    if mode != "auto":
+        return mode == "native"
+    try:
+        host = (urlsplit(model_config.get("base_url", "")).hostname or "").lower()
+    except ValueError:
+        return False
+    model = str(model_config.get("model", "")).strip().lower()
+    return (host == "api.deepseek.com" and model in {
+        "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
+    }) or (host == "dashscope.aliyuncs.com" and model == "deepseek-v4.1-flash")
 
 
 def normalize_config(config: dict) -> dict:
@@ -197,10 +215,10 @@ DEFAULT_MODEL_CONFIGS = [
         "api_type": "deepseek",
     },
     {
-        "name": "DeepSeek V4 Flash",
+        "name": "DeepSeek V4.1 Flash",
         "api_key": "",
         "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-v4-flash",
+        "model": "deepseek-flash",
         "system_prompt": DEFAULT_SYSTEM_PROMPT,
         "context_length": 1000000,
         "compact_threshold": 600000,

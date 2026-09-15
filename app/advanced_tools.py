@@ -219,7 +219,8 @@ class BackgroundManager:
 
 # ── Context compression (s06) ────────────────────────────────────────
 def estimate_tokens(messages: list) -> int:
-    return len(json.dumps(messages, default=str)) // 4
+    from app.multimodal import estimate_message_tokens
+    return estimate_message_tokens(messages)
 
 
 def _summarize_text(model_config: dict, text: str, timeout_seconds: float = 120,
@@ -350,7 +351,9 @@ def auto_compact(messages: list, model_config: dict,
 
     # 分块：按消息累积到 CHUNK_CHARS 一块，逐块摘要，避免硬截断丢弃早期内容
     chunks, cur, cur_len = [], [], 0
-    for m in middle:
+    from app.multimodal import summary_safe
+    for original in middle:
+        m = summary_safe(original)
         s = json.dumps(m, default=str, ensure_ascii=False)
         if cur and cur_len + len(s) > CHUNK_CHARS:
             chunks.append(cur)
@@ -394,9 +397,15 @@ def auto_compact(messages: list, model_config: dict,
     # Reassemble: system (unchanged prefix) + summary + recent tail
     compacted = list(system_msgs)
     archive_note = f"完整原始记录已存档：{path}" if path else "完整原始记录存档失败"
+    image_paths = list(dict.fromkeys(
+        ref["path"] for message in middle for ref in message.get("images", []) if ref.get("path")
+    ))
+    image_note = ""
+    if image_paths:
+        image_note = "\n较早图片的原始快照（未重新发送图片；需要复查时使用 view_image，纯文本模型使用 analyze_image）：\n" + "\n".join(image_paths)
     compacted.append({"role": "user", "content":
         f"<context_summary>\n以下是之前对话的结构化摘要（{archive_note}）。"
-        f"请把它当作你已经掌握的上下文，无缝继续后续工作：\n{summary}\n</context_summary>"})
+        f"请把它当作你已经掌握的上下文，无缝继续后续工作：\n{summary}{image_note}\n</context_summary>"})
     compacted.append({"role": "assistant", "content": "已完整了解之前的对话上下文，继续。"})
     compacted.extend(tail)
     report("completed", f"{estimate_tokens(messages)} -> {estimate_tokens(compacted)}")

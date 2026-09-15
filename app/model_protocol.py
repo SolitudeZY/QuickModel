@@ -14,6 +14,10 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from app.config import normalize_model_config
+from app.multimodal import (
+    check_request_size, convert_content, estimate_message_tokens,
+    prepare_image_messages, summary_safe,
+)
 
 
 TextCallback = Optional[Callable[[str], None]]
@@ -41,7 +45,7 @@ def _usage_value(usage: Any, *names: str) -> int:
 
 def _estimate_tokens(value: Any) -> int:
     try:
-        return max(1, len(json.dumps(value, ensure_ascii=False, default=str)) // 4)
+        return max(1, estimate_message_tokens(value))
     except Exception:
         return 1
 
@@ -95,6 +99,7 @@ def model_config_fingerprint(model_config: dict) -> str:
         "auth_mode": config["auth_mode"],
         "client_profile": config["client_profile"],
         "responses_server_state": config["responses_server_state"],
+        "image_input_mode": config["image_input_mode"],
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -202,7 +207,7 @@ class _RetryExhaustedError(RuntimeError):
 
 
 def _redact(text: Any, secrets: list[str]) -> str:
-    rendered = str(text or "")
+    rendered = summary_safe(str(text or ""))
     for secret in secrets:
         if secret:
             rendered = rendered.replace(secret, "***")
@@ -337,6 +342,9 @@ class ModelAdapter:
         tools = list(tools or [])
         seen: list[str] = []
         try:
+            messages = prepare_image_messages(messages, self.raw_config)
+            if incremental_messages is not None:
+                incremental_messages = prepare_image_messages(incremental_messages, self.raw_config)
             return self._stream_with_retries(
                 messages, tools, thinking, stop_event, on_text, on_thinking,
                 previous_response_id, incremental_messages, max_tokens, seen, stateless,
@@ -495,6 +503,7 @@ class OpenAIChatAdapter(ModelAdapter):
         reasoning = ""
         usage_obj = None
         calls: dict[int, dict] = {}
+        check_request_size(kwargs)
         stream = self._get_client().chat.completions.create(**kwargs)
         try:
             for chunk in stream:
@@ -602,7 +611,7 @@ def _responses_input(messages: list[dict]) -> tuple[str, list[dict]]:
         if role in ("user", "assistant"):
             content = message.get("content")
             if content:
-                items.append({"role": role, "content": str(content)})
+                items.append({"role": role, "content": convert_content(content, "openai_responses")})
             if role == "assistant":
                 for call in message.get("tool_calls") or []:
                     function = call.get("function", {})
@@ -687,6 +696,7 @@ class OpenAIResponsesAdapter(ModelAdapter):
         usage_obj = None
         response_id = ""
         calls: dict[Any, dict] = {}
+        check_request_size(kwargs)
         stream = self._get_client().responses.create(**kwargs)
         try:
             for event in stream:
@@ -825,7 +835,8 @@ def _anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
         if role == "system":
             continue
         if role == "user":
-            append("user", [{"type": "text", "text": str(message.get("content") or "")}])
+            content = convert_content(message.get("content"), "anthropic_messages")
+            append("user", content if isinstance(content, list) else [{"type": "text", "text": content}])
         elif role == "assistant":
             blocks = []
             if message.get("content"):
@@ -905,6 +916,7 @@ class AnthropicMessagesAdapter(ModelAdapter):
         usage_start = None
         usage_end = None
         calls: dict[int, dict] = {}
+        check_request_size(kwargs)
         stream = self._get_client().messages.create(**kwargs)
         try:
             for event in stream:
