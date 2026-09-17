@@ -37,6 +37,86 @@ class ConversationManagementTests(unittest.TestCase):
         save_conversation(conv)
         return conv
 
+    def test_finished_run_refreshes_usage_from_saved_history(self):
+        conv = self._conversation("Manual title", messages=[{"role": "user", "content": "x" * 10000}])
+        conv["title_source"] = "manual"
+        save_conversation(conv)
+        api = API.__new__(API)
+        api._temporary_conversations = {}
+        api._config = {}
+        api._agent = None
+        api._running = True
+        scripts = []
+        api._js = scripts.append
+        api._notify_system = lambda *_: None
+        history = [{"role": "user", "content": "short summary"}]
+        api._on_done(conv, history)
+        usage = api.get_context_usage(conv["id"])
+        self.assertLess(usage["used"], 100)
+        self.assertTrue(any(f'Chat.updateContext({usage["used"]},' in js and conv["id"] in js for js in scripts))
+        self.assertEqual(load_conversation(conv["id"])["messages"], history)
+
+    def test_slash_compact_does_not_append_model_trigger(self):
+        conv = self._conversation("history", messages=[{"role": "user", "content": "original"}])
+        api = API.__new__(API)
+        api._temporary_conversations = {}
+        api._running = False
+        with patch.object(api, "_start_agent") as start:
+            api.send_message(conv["id"], "__slash_compact__", [])
+        self.assertTrue(start.call_args.kwargs["compact_only"])
+        self.assertEqual(start.call_args.args[0]["messages"], conv["messages"])
+        self.assertEqual(load_conversation(conv["id"])["messages"], conv["messages"])
+
+    def test_auto_title_preserves_messages_saved_during_title_request(self):
+        conv = self._conversation("draft", messages=[{"role": "user", "content": "request"}])
+        api = API.__new__(API)
+        api._temporary_conversations = {}
+        api._config = {}
+        api._js = lambda *_: None
+
+        def generate(*args, **kwargs):
+            latest = load_conversation(conv["id"])
+            latest["messages"].append({"role": "user", "content": "newer request"})
+            save_conversation(latest)
+            return "Generated title"
+
+        with patch("app.webview_app.get_active_model_config", return_value={"model": "test"}), \
+                patch("app.webview_app.complete_text", side_effect=generate):
+            api._auto_title(conv)
+        latest = load_conversation(conv["id"])
+        self.assertEqual(len(latest["messages"]), 2)
+        self.assertEqual(latest["title"], "Generated title")
+
+    def test_manual_title_wins_over_pending_auto_title(self):
+        from app.conversation import rename_conversation
+        conv = self._conversation("draft", messages=[{"role": "user", "content": "request"}])
+        api = API.__new__(API)
+        api._temporary_conversations = {}
+        api._config = {}
+        api._js = lambda *_: None
+
+        def generate(*args, **kwargs):
+            rename_conversation(conv["id"], "My title")
+            return "Generated title"
+
+        with patch("app.webview_app.get_active_model_config", return_value={"model": "test"}), \
+                patch("app.webview_app.complete_text", side_effect=generate):
+            api._auto_title(conv)
+        self.assertEqual(load_conversation(conv["id"])["title"], "My title")
+
+    def test_sync_conflict_copies_use_file_identity(self):
+        original = self._conversation("original", "E:/missing")
+        conflict = self.root / (original["id"] + "-conflict-machine.json")
+        conflict.write_bytes((self.root / (original["id"] + ".json")).read_bytes())
+        ids = [item["id"] for item in list_conversations()]
+        self.assertEqual(set(ids), {original["id"], conflict.stem})
+        self.assertEqual(load_conversation(conflict.stem)["id"], conflict.stem)
+        self.assertEqual({item["id"] for item in search_conversations("original")}, set(ids))
+        self.assertEqual(set_project_archived("e:/missing/"), 2)
+        self.assertTrue(load_conversation(conflict.stem)["archived_at"])
+        self.assertEqual(delete_conversations(ids), 2)
+        self.assertEqual(list_conversations(), [])
+
     def test_conversation_and_project_archive_round_trip(self):
         first = self._conversation("first", "E:/project-a")
         second = self._conversation("second", "E:/project-a")

@@ -391,6 +391,7 @@ class Agent:
         on_ask_user: Optional[Callable[[dict], str]] = None,
         on_secret_input: Optional[Callable[[dict], str]] = None,
         on_notice: Optional[Callable[[str], None]] = None,
+        compact_only: bool = False,
     ):
         """在调用线程中同步运行（应在后台线程调用）。"""
         self._stop_flag.clear()
@@ -415,6 +416,26 @@ class Agent:
         }
 
         try:
+            if compact_only:
+                def status(state, detail=""):
+                    if cb.on_notice:
+                        labels = {
+                            "started": "正在压缩上下文…",
+                            "completed": f"上下文压缩完成：{detail}",
+                            "failed": f"压缩失败，原始历史已保留：{detail}",
+                            "skipped": f"无需压缩：{detail}",
+                        }
+                        cb.on_notice(labels.get(state, detail))
+                compacted = auto_compact(
+                    all_messages, self.model_config,
+                    summary_model_config=self._summary_model_config(),
+                    target_tokens=self.compact_threshold,
+                    stop_event=self._stop_flag, on_status=status,
+                )
+                if cb.on_context_update:
+                    cb.on_context_update(estimate_tokens([m for m in compacted if m.get("role") != "system"]), self.compact_threshold)
+                cb.on_done(compacted[1:])
+                return
             if messages and messages[-1].get("images") and cb.on_notice:
                 model_label = f"{self.model_config.get('name') or self.model}（{self.model}）"
                 if supports_native_images(self.model_config):
@@ -509,7 +530,9 @@ class Agent:
                 if state == "started":
                     cb.on_notice("上下文已达到自动压缩阈值，正在压缩，请稍候…")
                 elif state == "completed":
-                    cb.on_notice("上下文自动压缩完成，正在继续生成。")
+                    cb.on_notice(f"上下文自动压缩完成：{detail}。正在继续生成。")
+                elif state in ("fallback", "progress"):
+                    cb.on_notice(detail)
                 elif state == "failed":
                     cb.on_notice(f"上下文自动压缩失败，已保留原始内容：{detail}")
                 elif state == "skipped":
@@ -525,7 +548,7 @@ class Agent:
             )
             all_messages = compacted
         if cb.on_context_update:
-            cb.on_context_update(estimate_tokens(all_messages), threshold)
+            cb.on_context_update(estimate_tokens([m for m in all_messages if m.get("role") != "system"]), threshold)
         return all_messages
 
     def _prepare_messages(self, all_messages: list[dict]) -> list[dict]:
@@ -664,6 +687,8 @@ class Agent:
                     compact_status["detail"] = detail
                     if cb.on_notice and state == "started":
                         cb.on_notice("正在手动压缩上下文，请稍候…")
+                    elif cb.on_notice and state in ("fallback", "progress"):
+                        cb.on_notice(detail)
 
                 compact_result = auto_compact(
                     all_messages,
@@ -677,7 +702,7 @@ class Agent:
                 if state == "completed":
                     all_messages.clear()
                     all_messages.extend(compact_result)
-                    result = "上下文已压缩"
+                    result = f"上下文已压缩：{compact_status.get('detail', '')}"
                 elif state == "failed":
                     result = f"上下文压缩失败，已保留原始内容：{compact_status.get('detail', '')}"
                 else:

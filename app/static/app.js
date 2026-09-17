@@ -1275,7 +1275,10 @@ function loadHistory(messages) {
     const role = msg.role;
     const content = msg.content || '';
     if (role === 'user') {
-      addUserBubble(content);
+      const internal = msg.image_origin === "tool"
+        || (msg.images && content.startsWith("工具载入的图片（"))
+        || /^<(context_summary|bg_notification|team_inbox)>/.test(content);
+      addUserBubble(content, !internal);
     } else if (role === 'assistant') {
       if (content) addAssistantBubble(content);
       // 还原该轮的工具调用气泡（含参数、占位「等待中…」）
@@ -1300,10 +1303,11 @@ function loadHistory(messages) {
   requestAnimationFrame(() => chatMessages.classList.remove('no-animate'));
 }
 
-function addUserBubble(text) {
+function addUserBubble(text, isUserInput = true) {
   _resetToolStreak();
   const div = document.createElement('div');
   div.className = 'bubble bubble-user';
+  if (isUserInput) div.dataset.userInput = 'true';
   const collapsible = document.createElement('div');
   collapsible.className = 'bubble-collapsible';
   collapsible.innerHTML = `<div class="bubble-label">You</div><div class="bubble-content">${buildUserContent(text)}</div>`;
@@ -1708,7 +1712,8 @@ window.Chat = {
     // Refresh worktree panel on team activity
     refreshWorktreePanel();
   },
-  updateContext(used, total) {
+  updateContext(used, total, convId = null) {
+    if (convId && convId !== state.currentConvId) return;
     updateContextBar(used, total);
   },
   updateUsage(data) {
@@ -2110,6 +2115,7 @@ async function newConvWithMemory() {
 
 // ── Context bar ───────────────────────────────────────────────────
 function updateContextBar(used, total) {
+  $('context-bar-wrap').title = `会话历史估算：${used.toLocaleString()} tokens；自动压缩阈值：${total.toLocaleString()} tokens。并非累计消耗或模型窗口上限，不含系统提示及工具定义。`;
   const pct = Math.min(100, Math.round(used / total * 100));
   $('ctx-used').textContent = used >= 1000 ? (used/1000).toFixed(1)+'k' : used;
   $('ctx-total').textContent = total >= 1000 ? (total/1000).toFixed(0)+'k' : total;
@@ -2446,19 +2452,22 @@ $('btn-import').addEventListener('click', async () => {
 });
 
 // ── Chat nav buttons ──────────────────────────────────────────────
+let _chatNavAnimation = 0;
 function smoothScrollTo(targetScrollTop, duration = 320) {
+  cancelAnimationFrame(_chatNavAnimation);
   const area = $('chat-area');
   const start = area.scrollTop;
-  const delta = targetScrollTop - start;
+  const target = Math.max(0, Math.min(targetScrollTop, area.scrollHeight - area.clientHeight));
+  const delta = target - start;
   if (Math.abs(delta) < 2) return;
   const startTime = performance.now();
   function step(now) {
     const t = Math.min((now - startTime) / duration, 1);
     const ease = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3) / 2;
     area.scrollTop = start + delta * ease;
-    if (t < 1) requestAnimationFrame(step);
+    _chatNavAnimation = t < 1 ? requestAnimationFrame(step) : 0;
   }
-  requestAnimationFrame(step);
+  _chatNavAnimation = requestAnimationFrame(step);
 }
 
 $('btn-nav-bottom').addEventListener('click', () => {
@@ -2466,12 +2475,12 @@ $('btn-nav-bottom').addEventListener('click', () => {
 });
 
 $('btn-nav-prev').addEventListener('click', () => {
-  const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user, .bubble-assistant'));
+  const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user[data-user-input="true"]'));
   if (!bubbles.length) return;
   const area = $('chat-area');
   const areaScrollTop = area.scrollTop;
   for (let i = bubbles.length - 1; i >= 0; i--) {
-    const bubbleTop = bubbles[i].offsetTop - chatMessages.offsetTop;
+    const bubbleTop = bubbles[i].getBoundingClientRect().top - area.getBoundingClientRect().top + area.scrollTop;
     if (bubbleTop < areaScrollTop - 10) {
       smoothScrollTo(bubbleTop - 8);
       return;
@@ -2480,12 +2489,12 @@ $('btn-nav-prev').addEventListener('click', () => {
 });
 
 $('btn-nav-next').addEventListener('click', () => {
-  const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user, .bubble-assistant'));
+  const bubbles = Array.from(chatMessages.querySelectorAll('.bubble-user[data-user-input="true"]'));
   if (!bubbles.length) return;
   const area = $('chat-area');
   const areaScrollTop = area.scrollTop;
   for (let i = 0; i < bubbles.length; i++) {
-    const bubbleTop = bubbles[i].offsetTop - chatMessages.offsetTop;
+    const bubbleTop = bubbles[i].getBoundingClientRect().top - area.getBoundingClientRect().top + area.scrollTop;
     if (bubbleTop > areaScrollTop + 10) {
       smoothScrollTo(bubbleTop - 8);
       return;

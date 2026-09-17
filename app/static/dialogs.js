@@ -317,6 +317,7 @@ async function openDiffModal(path, fname) {
          + `<span class="diff-sign">${sign}</span>`
          + `<span class="diff-text">${escapeHtml(ln.text) || '&nbsp;'}</span></div>`;
   }).join('');
-  $('diff-body').innerHTML = rows;
+  $('diff-body').innerHTML = `<div class="diff-lines">${rows}</div>`;
+  $('diff-body').scrollLeft = 0;
 }
 function closeDiffModal() { $('diff-overlay').classList.add('hidden'); }

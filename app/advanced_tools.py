@@ -249,7 +249,9 @@ def _summarize_text(model_config: dict, text: str, timeout_seconds: float = 120,
                 model_config,
                 [{"role": "user", "content": prompt}],
                 stop_event=request_stop,
-            ) or "(无摘要)"
+            )
+            if not result or not result.strip():
+                raise ValueError("摘要模型返回空内容")
             result_queue.put((True, result))
         except BaseException as exc:
             result_queue.put((False, exc))
@@ -276,7 +278,7 @@ def _summarize_text(model_config: dict, text: str, timeout_seconds: float = 120,
 
 def auto_compact(messages: list, model_config: dict,
                  summary_model_config: dict = None, target_tokens: int = 0,
-                 timeout_seconds: float = 120, stop_event: threading.Event = None,
+                 timeout_seconds: float = None, stop_event: threading.Event = None,
                  on_status=None) -> list:
     """Summarize conversation when context is too large.
 
@@ -349,32 +351,47 @@ def auto_compact(messages: list, model_config: dict,
     except OSError:
         path = None
 
-    # 分块：按消息累积到 CHUNK_CHARS 一块，逐块摘要，避免硬截断丢弃早期内容
-    chunks, cur, cur_len = [], [], 0
+    # Bound every chunk, including a single oversized tool result. Preserve
+    # all text while keeping image encodings out of summary requests.
     from app.multimodal import summary_safe
-    for original in middle:
-        m = summary_safe(original)
-        s = json.dumps(m, default=str, ensure_ascii=False)
-        if cur and cur_len + len(s) > CHUNK_CHARS:
-            chunks.append(cur)
-            cur, cur_len = [], 0
-        cur.append(m)
-        cur_len += len(s)
-    if cur:
-        chunks.append(cur)
+    middle_text = json.dumps([summary_safe(m) for m in middle], default=str, ensure_ascii=False)
+    chunks = [middle_text[i:i + CHUNK_CHARS]
+              for i in range(0, len(middle_text), CHUNK_CHARS)]
+
+    def summarize(text):
+        nonlocal summary_config
+        if stop_event is not None and stop_event.is_set():
+            raise InterruptedError("用户已停止上下文压缩")
+        try:
+            return _summarize_text(
+                summary_config, text,
+                timeout_seconds=min(120, max(0.01, deadline - time.monotonic())),
+                stop_event=stop_event,
+            )
+        except Exception:
+            if (summary_config == model_config or time.monotonic() >= deadline
+                    or (stop_event is not None and stop_event.is_set())):
+                raise
+            report("fallback", "摘要模型不可用，切换当前主模型继续压缩")
+            summary_config = model_config
+            return _summarize_text(
+                summary_config, text,
+                timeout_seconds=min(120, max(0.01, deadline - time.monotonic())),
+                stop_event=stop_event,
+            )
 
     try:
-        deadline = time.monotonic() + max(0.01, float(timeout_seconds))
+        # Default budget scales with work; explicit timeouts remain total limits.
+        total_budget = (120 * (len(chunks) + (len(chunks) > 1))
+                        if timeout_seconds is None else max(0.01, float(timeout_seconds)))
+        deadline = time.monotonic() + total_budget
         part_summaries = []
         for i, ch in enumerate(chunks):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"上下文摘要超过 {timeout_seconds:g} 秒")
-            ch_text = json.dumps(ch, default=str, ensure_ascii=False)
-            part_summaries.append(_summarize_text(
-                summary_config, ch_text, timeout_seconds=remaining,
-                stop_event=stop_event,
-            ))
+                raise TimeoutError(f"上下文摘要超过 {total_budget:g} 秒")
+            report("progress", f"正在压缩第 {i + 1}/{len(chunks)} 块历史…")
+            part_summaries.append(summarize(ch))
         if len(part_summaries) == 1:
             summary = part_summaries[0]
         else:
@@ -382,12 +399,10 @@ def auto_compact(messages: list, model_config: dict,
             merged = "\n\n".join(f"[片段{i+1}]\n{s}" for i, s in enumerate(part_summaries))
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(f"上下文摘要超过 {timeout_seconds:g} 秒")
-            summary = _summarize_text(
-                summary_config,
+                raise TimeoutError(f"上下文摘要超过 {total_budget:g} 秒")
+            report("progress", "正在合并历史摘要…")
+            summary = summarize(
                 f"以下是同一段对话按时间顺序分块得到的多份摘要，请合并为一份连贯、不丢信息的结构化摘要：\n{merged}",
-                timeout_seconds=remaining,
-                stop_event=stop_event,
             )
     except Exception as e:
         # 关键：摘要失败不丢中段，退化为不压缩，避免灾难性失忆
@@ -408,7 +423,12 @@ def auto_compact(messages: list, model_config: dict,
         f"请把它当作你已经掌握的上下文，无缝继续后续工作：\n{summary}{image_note}\n</context_summary>"})
     compacted.append({"role": "assistant", "content": "已完整了解之前的对话上下文，继续。"})
     compacted.extend(tail)
-    report("completed", f"{estimate_tokens(messages)} -> {estimate_tokens(compacted)}")
+    before = estimate_tokens(conv_msgs)
+    after = estimate_tokens([m for m in compacted if m.get("role") != "system"])
+    if after >= before:
+        report("skipped", f"摘要未减少上下文（{before:,} → {after:,} tokens），保留原始历史")
+        return messages
+    report("completed", f"{before:,} → {after:,} tokens，减少 {(before - after) / before:.1%}")
     return compacted
 
 

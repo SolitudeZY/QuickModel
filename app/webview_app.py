@@ -1013,11 +1013,9 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         if not conv:
             return
 
-        # /compact slash command — inject as tool call trigger
-        if text == '__slash_compact__':
-            conv['messages'].append({'role': 'user', 'content': '请立即压缩上下文（调用 compact 工具）。'})
-            self._save_conversation(conv)
-            self._start_agent(conv)
+        # Compression is a local command, not an instruction requiring a model round.
+        if text in ('__slash_compact__', '/compact', '请立即压缩上下文（调用 compact 工具）。') and not files:
+            self._start_agent(conv, compact_only=True)
             return
 
         mc = get_active_model_config(self._config)
@@ -1074,8 +1072,11 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         conv['messages'].append(user_msg)
 
         # Auto-title on first message
-        if len(conv['messages']) == 1:
-            auto_title_from_message(conv, full_text)
+        if conv.get('title', '新对话') == '新对话':
+            auto_title_from_message(conv, text or full_text)
+            conv['title_source'] = 'auto_pending'
+        self._save_conversation(conv)
+        self._js(f'Chat.updateConvTitle({json.dumps(conv["id"])}, {json.dumps(conv["title"])})')
 
         self._active_model_name = mc.get('model', '')
         self._active_model_config_name = mc.get('name', '')
@@ -1126,7 +1127,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _start_agent(self, conv: dict) -> None:
+    def _start_agent(self, conv: dict, compact_only: bool = False) -> None:
         """Start agent for an already-prepared conv (used by slash commands)."""
         mc = get_active_model_config(self._config)
         if not mc:
@@ -1177,6 +1178,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 on_ask_user=self._on_ask_user,
                 on_secret_input=self._on_secret_input,
                 on_notice=self._on_notice,
+                compact_only=compact_only,
             )
 
         threading.Thread(target=run, daemon=True).start()
@@ -1306,7 +1308,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         self._js(f'Chat.appendToken({json.dumps(token)})')
 
     def _on_context_update(self, used: int, total: int):
-        self._js(f'Chat.updateContext({used}, {total})')
+        conv_id = json.dumps(getattr(self, '_current_conv_id', None))
+        self._js(f'Chat.updateContext({used}, {total}, {conv_id})')
 
     def _on_thinking(self, token: str):
         self._js(f'Chat.appendThinking({json.dumps(token)})')
@@ -1645,6 +1648,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         self._merge_agent_provider_state(conv)
         self._merge_disk_file_tracking(conv)
         self._save_conversation(conv)
+        ctx = self.get_context_usage(conv['id'])
+        self._js(f'Chat.updateContext({ctx["used"]}, {ctx["total"]}, {json.dumps(conv["id"])})')
         self._running = False
         self._js('Chat.finishMessage()')
         # Notify user if window is in background
@@ -1654,7 +1659,11 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             upload_conversation(conv["id"])
         # Only auto-title if still a placeholder
         title = conv.get('title', '新对话')
-        if title == '新对话' or len(title) <= 30:
+        first_user = next((str(m.get('content') or '') for m in conv.get('messages', [])
+                           if m.get('role') == 'user'), '')
+        placeholder = title == '新对话' or title == first_user.strip().replace('\n', ' ')[:30]
+        if not conv.get('temporary') and (conv.get('title_source') == 'auto_pending'
+                                         or (not conv.get('title_source') and placeholder)):
             threading.Thread(target=self._auto_title, args=(conv,), daemon=True).start()
 
     def _auto_title(self, conv: dict):
@@ -1683,9 +1692,14 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             )
             title = (generated or '').strip().strip('"\'')
             if title:
-                conv['title'] = title
-                self._save_conversation(conv)
-                self._js(f'Chat.updateConvTitle({json.dumps(conv["id"])}, {json.dumps(title)})')
+                latest = self._load_conversation(conv['id'])
+                if (not latest or latest.get('title_source') == 'manual'
+                        or latest.get('title') != conv.get('title')):
+                    return
+                latest['title'] = title[:40]
+                latest['title_source'] = 'auto'
+                self._save_conversation(latest)
+                self._js(f'Chat.updateConvTitle({json.dumps(latest["id"])}, {json.dumps(latest["title"])})')
         except Exception:
             pass
 
@@ -1703,7 +1717,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 conv['file_ops'] = latest['file_ops']
             if latest.get('file_baselines'):
                 conv['file_baselines'] = latest['file_baselines']
-            for field in ('archived_at', 'project_path'):
+            for field in ('title', 'title_source', 'archived_at', 'project_path'):
                 if field in latest:
                     conv[field] = latest[field]
                 else:
@@ -1726,6 +1740,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         self._merge_agent_provider_state(conv)
         self._merge_disk_file_tracking(conv)
         self._save_conversation(conv)
+        ctx = self.get_context_usage(conv['id'])
+        self._js(f'Chat.updateContext({ctx["used"]}, {ctx["total"]}, {json.dumps(conv["id"])})')
         self._running = False
         self._js(f'Chat.showError({json.dumps(error)})')
 

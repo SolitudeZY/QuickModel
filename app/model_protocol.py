@@ -435,6 +435,11 @@ class ModelAdapter:
         prefix = f"{self.config.name or self.config.model} ({self.config.api_protocol})"
         if endpoint:
             prefix += f" @ {endpoint}"
+        if "datainspectionfailed" in message.lower() or "data_inspection_failed" in message.lower():
+            return ProviderRequestError(
+                f"服务端内容审核拒绝了输入（{prefix}）。这不是超时，重复发送相同历史通常无法解决。"
+                f"可使用 /compact 直接压缩；若摘要也被拒绝，请检查历史内容或新建会话。详情：{message}"
+            )
         return ProviderRequestError(f"模型请求失败：{prefix}：{message}")
 
     def _stream_once(self, *args, **kwargs) -> ModelRoundResult:

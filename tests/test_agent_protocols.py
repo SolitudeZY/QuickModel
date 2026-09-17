@@ -150,6 +150,26 @@ class AgentProtocolTests(unittest.TestCase):
         self.assertEqual(messages[0]["content"], "important history")
         self.assertEqual(len(messages), 2)
 
+    def test_compact_command_never_requests_main_model_round(self):
+        agent = object.__new__(Agent)
+        agent.model_config = model_config("openai_chat")
+        agent._model_configs = []
+        agent._stop_flag = threading.Event()
+        agent._subagent_results = {}
+        agent.system_prompt = "system"
+        agent.compact_threshold = 100
+        done, errors = [], []
+        messages = [{"role": "user", "content": "history"}]
+        with patch("app.agent.auto_compact", side_effect=lambda msgs, *a, **kw: msgs) as compact, \
+                patch.object(agent, "_stream_and_parse") as stream:
+            agent.run(messages, lambda *_: None, lambda *_: None,
+                      lambda *_: None, lambda *_: True, done.append,
+                      lambda *args: errors.append(args), compact_only=True)
+        compact.assert_called_once()
+        stream.assert_not_called()
+        self.assertEqual(done, [messages])
+        self.assertEqual(errors, [])
+
     def test_failed_auto_compact_is_not_retried_in_same_run(self):
         agent = object.__new__(Agent)
         agent.model_config = model_config("openai_chat")

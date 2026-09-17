@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 import time
 from tempfile import TemporaryDirectory
@@ -6,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app import advanced_tools
+from app.advanced_tools import auto_compact, _summarize_text
 from app.agent import Agent
 
 
@@ -236,6 +238,77 @@ class ModelCallerTests(unittest.TestCase):
             if "chat.completions.create" in text or ".responses.create(" in text or ".messages.create(" in text:
                 offenders.append(path.name)
         self.assertEqual(offenders, [])
+
+
+
+class CompactionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.directory = patch("app.advanced_tools.get_app_data_dir", return_value=Path(self.tmp.name))
+        self.directory.start()
+        self.addCleanup(self.directory.stop)
+        self.messages = [{"role": "system", "content": "stable"}]
+        self.messages += [{"role": "user", "content": "x" * 130000}]
+        self.messages += [{"role": "user", "content": str(i)} for i in range(15)]
+
+    def test_failed_compaction_preserves_original_list(self):
+        errors = []
+        with patch("app.advanced_tools._summarize_text", side_effect=RuntimeError("unavailable")):
+            result = auto_compact(self.messages, {}, on_status=lambda state, detail: errors.append(detail) if state == "failed" else None)
+        self.assertIs(result, self.messages)
+        self.assertEqual(len(result), 17)
+        self.assertEqual(errors, ["unavailable"])
+
+    def test_oversized_message_is_split_without_losing_text(self):
+        with patch("app.advanced_tools._summarize_text", return_value="summary") as summary:
+            result = auto_compact(self.messages, {})
+        parts = [call.args[1] for call in summary.call_args_list[:-1]]
+        self.assertTrue(all(len(part) <= 60000 for part in parts))
+        self.assertEqual("".join(parts).count("x"), 130000)
+        self.assertEqual(result[0], self.messages[0])
+        self.assertEqual(result[-15:], self.messages[-15:])
+
+    def test_bad_summary_endpoint_falls_back_to_main_model(self):
+        def summarize(config, text, **kwargs):
+            if config.get("model") == "cheap":
+                raise RuntimeError("unavailable")
+            return "summary"
+        with patch("app.advanced_tools._summarize_text", side_effect=summarize):
+            result = auto_compact(self.messages, {"model": "main"}, {"model": "cheap"})
+        self.assertIsNot(result, self.messages)
+
+    def test_multichunk_default_budget_and_explicit_deadline(self):
+        for timeout, should_complete in ((None, True), (120, False)):
+            clock = [0.0]
+            statuses = []
+
+            def summarize(config, text, **kwargs):
+                self.assertLessEqual(kwargs["timeout_seconds"], 120)
+                clock[0] += 70
+                return "summary"
+
+            with patch("app.advanced_tools.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("app.advanced_tools._summarize_text", side_effect=summarize):
+                result = auto_compact(
+                    self.messages, {}, timeout_seconds=timeout,
+                    on_status=lambda state, detail="": statuses.append(state),
+                )
+            self.assertEqual(result is not self.messages, should_complete)
+            self.assertIn("progress", statuses)
+            self.assertEqual(statuses[-1], "completed" if should_complete else "failed")
+
+    def test_summary_that_increases_context_is_not_applied(self):
+        statuses = []
+        with patch("app.advanced_tools._summarize_text", return_value="x" * 200000):
+            result = auto_compact(self.messages, {}, on_status=lambda state, detail="": statuses.append(state))
+        self.assertIs(result, self.messages)
+        self.assertEqual(statuses[-1], "skipped")
+
+    def test_empty_summary_is_failure(self):
+        with patch("app.model_protocol.complete_text", return_value=" "):
+            with self.assertRaises(ValueError):
+                _summarize_text({}, "history")
 
 
 if __name__ == "__main__":

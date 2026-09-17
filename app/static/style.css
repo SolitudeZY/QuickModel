@@ -765,10 +765,12 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
 
 /* ── Thinking bubble ── */
 .bubble-thinking {
-  background: transparent;
+  background: var(--surface);
+  color: var(--text);
+  text-shadow: none;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  opacity: 0.75;
+  opacity: 1;
   font-size: 12px;
 }
 .thinking-toggle {
@@ -789,19 +791,21 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
   white-space: pre-wrap;
   color: var(--text-dim);
   font-family: Consolas, 'SF Mono', Menlo, monospace;
-  font-size: 11px;
+  font-size: 13px;
+  line-height: 1.6;
+  text-shadow: none;
   max-height: 300px;
   overflow-y: auto;
 }
 .thinking-body.open { display: block; }
 
 [data-period="dusk"][data-starfield="on"] .bubble-thinking {
-  background: transparent;
+  background: #fff4ed;
   border-color: rgba(74, 45, 39, 0.38);
   border-left-color: #9f4f40;
   color: #332522;
   opacity: 1;
-  text-shadow: 0 1px 0 rgba(255, 248, 244, 0.70);
+  text-shadow: none;
 }
 [data-period="dusk"][data-starfield="on"] .thinking-toggle {
   color: #71382f;
@@ -1630,6 +1634,7 @@ body.drag-over #input-area { border-top-color: var(--accent); background: var(--
 #diff-path { padding: 5px 14px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); word-break: break-all; }
 #diff-body { overflow: auto; font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
 .diff-loading, .diff-empty { padding: 24px; text-align: center; color: var(--text-muted); }
+.diff-lines { width: max-content; min-width: 100%; }
 .diff-row { display: flex; white-space: pre; }
 .diff-gutter { flex-shrink: 0; width: 42px; text-align: right; padding: 0 6px; color: var(--text-muted); user-select: none; opacity: 0.6; }
 .diff-sign { flex-shrink: 0; width: 14px; text-align: center; user-select: none; }

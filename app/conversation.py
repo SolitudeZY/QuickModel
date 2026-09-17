@@ -40,7 +40,10 @@ def load_conversation(conv_id: str) -> Optional[dict]:
     if not p.exists():
         return None
     with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    # Sync conflict copies have distinct filenames but may share an embedded ID.
+    data["id"] = p.stem
+    return data
 
 
 def delete_conversation(conv_id: str) -> None:
@@ -64,6 +67,7 @@ def rename_conversation(conv_id: str, new_title: str) -> None:
     conv = load_conversation(conv_id)
     if conv:
         conv["title"] = new_title.strip() or "新对话"
+        conv["title_source"] = "manual"
         save_conversation(conv)
 
 
@@ -133,7 +137,7 @@ def list_conversations() -> list[dict]:
             with open(p, "r", encoding="utf-8") as f:
                 data = json.load(f)
             convs.append({
-                "id": data["id"],
+                "id": p.stem,
                 "title": data.get("title", "新对话"),
                 "created_at": data.get("created_at", ""),
                 "updated_at": data.get("updated_at", ""),
@@ -165,7 +169,7 @@ def search_conversations(keyword: str) -> list[dict]:
                 data = json.load(f)
             title = str(data.get("title", "") or "")
             base = {
-                "id": data["id"],
+                "id": path.stem,
                 "title": title,
                 "project_path": data.get("project_path", ""),
                 "archived": bool(data.get("archived_at")),

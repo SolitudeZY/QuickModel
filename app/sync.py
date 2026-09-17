@@ -77,7 +77,7 @@ def detect_new_conversations() -> list[dict]:
                 with open(f, "r", encoding="utf-8") as fp:
                     data = json.load(fp)
                 new_convs.append({
-                    "id": data.get("id", f.stem),
+                    "id": f.stem,
                     "title": data.get("title", "未命名"),
                     "updated_at": data.get("updated_at", ""),
                     "filename": f.name,
