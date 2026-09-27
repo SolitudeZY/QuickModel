@@ -18,8 +18,9 @@ class Preferences(BaseModel):
     weather_mist: int = Field(default=32,ge=0,le=100)
     weather_refraction: int = Field(default=65,ge=20,le=100)
     weather_refresh_minutes: int = Field(default=30,ge=15,le=180)
-    max_output_tokens: int = Field(default=4096,ge=256,le=16384)
+    max_output_tokens: int = Field(default=0,ge=0,le=16384)
     thinking: Literal['off','on','max'] = 'off'
+    health_context_enabled: bool = False
 
 
 class ModelEdit(BaseModel):

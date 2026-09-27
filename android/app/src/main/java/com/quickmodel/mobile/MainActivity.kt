@@ -38,6 +38,59 @@ class MainActivity : Activity() {
     private val server = "https://47.102.146.139/quickmodel-api"
     private val prefs by lazy { getSharedPreferences("device", MODE_PRIVATE) }
     private val vaultLock = Any()
+    private var pickingImage = false
+    private lateinit var voice: VoiceController
+
+    @Deprecated("Activity result compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 44) {
+            pickingImage = false
+            if (resultCode != RESULT_OK || data == null) { imageEvent(JSONObject().put("cancelled", true)); return }
+            File(cacheDir, "screen-ready.jpg").delete(); File(cacheDir, "screen-error.txt").delete()
+            startForegroundService(Intent(this, ScreenCaptureService::class.java).putExtra("code", resultCode).putExtra("data", data))
+            imageEvent(JSONObject().put("cancelled", true))
+            moveTaskToBack(true)
+            return
+        }
+        if (requestCode == 43) {
+            pickingImage = false
+            val uri = data?.data
+            if (resultCode != RESULT_OK || uri == null) { imageEvent(JSONObject().put("cancelled", true)); return }
+            pool.execute {
+                val result = try { VideoAnalyzer.extract(this, uri, ::request) }
+                catch (e: Exception) { JSONObject().put("error", e.message?.take(120) ?: "视频分析准备失败") }
+                imageEvent(result)
+            }
+            return
+        }
+        if (requestCode != 41) return
+        pickingImage = false
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) { imageEvent(JSONObject().put("cancelled", true)); return }
+        pool.execute {
+            val result = try {
+                // ImageDecoder applies EXIF rotation, then scales without a full-size bitmap.
+                val source = android.graphics.ImageDecoder.createSource(contentResolver, uri)
+                val bitmap = android.graphics.ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    val scale = minOf(1.0, 1600.0 / maxOf(info.size.width, info.size.height))
+                    decoder.setTargetSize(maxOf(1, (info.size.width * scale).toInt()), maxOf(1, (info.size.height * scale).toInt()))
+                    decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                }
+                val output = java.io.ByteArrayOutputStream()
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, output); bitmap.recycle()
+                if (output.size() > 1000000) throw IllegalArgumentException("图片过大，请裁剪后重试")
+                val (status, body) = request("POST", "/media/images", JSONObject().put("data", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)))
+                if (status !in 200..299) throw IllegalStateException("图片上传失败（$status）")
+                JSONObject(body)
+            } catch (_: Exception) { JSONObject().put("error", "图片读取或上传失败，请检查网络并重新选择") }
+            imageEvent(result)
+        }
+    }
+
+    private fun imageEvent(result: JSONObject) {
+        runOnUiThread { if (!isDestroyed) web.evaluateJavascript("window.mobileImage && window.mobileImage(" + result.toString() + ")", null) }
+    }
 
     private fun key(): SecretKey = synchronized(vaultLock) {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
@@ -92,6 +145,38 @@ class MainActivity : Activity() {
         val method = input.optString("method", "GET")
         val path = input.optString("path")
         if (path == "/native/status") return JSONObject().put("paired", token().isNotEmpty())
+        if (path == "/native/capture-screen") {
+            runOnUiThread {
+                if (!pickingImage) {
+                    pickingImage = true
+                    val manager = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                    startActivityForResult(manager.createScreenCaptureIntent(), 44)
+                }
+            }
+            return JSONObject().put("started", true)
+        }
+        if (path.startsWith("/native/voice-")) {
+            val text = input.optJSONObject("body")?.optString("text") ?: ""
+            runOnUiThread {
+                when (path) {
+                    "/native/voice-start" -> voice.start()
+                    "/native/voice-stop" -> voice.stop(true)
+                    "/native/voice-cancel" -> voice.pause()
+                    "/native/voice-speak" -> voice.speak(text)
+                }
+            }
+            return JSONObject().put("ok", true)
+        }
+        if (path == "/native/pick-image" || path == "/native/pick-video") {
+            runOnUiThread {
+                if (!pickingImage) {
+                    pickingImage = true
+                    try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = if (path.endsWith("video")) "video/*" else "image/*"; addCategory(Intent.CATEGORY_OPENABLE) }, if (path.endsWith("video")) 43 else 41) }
+                    catch (_: Exception) { pickingImage = false; imageEvent(JSONObject().put("error", "系统图片选择器不可用")) }
+                }
+            }
+            return JSONObject().put("started", true)
+        }
         if (path == "/native/appearance") {
             val period = input.optJSONObject("body")?.optString("period") ?: "day"
             runOnUiThread {
@@ -111,7 +196,7 @@ class MainActivity : Activity() {
             }
             return JSONObject().put("value", prefs.getString("pending", null)?.let { decrypt(it) } ?: "{}")
         }
-        if (!Regex("^/(pair|device|models|settings|weather|conversations(?:/[A-Za-z0-9_-]+(?:/send)?)?|runs/[a-f0-9]+(?:/stop)?|health/(summary|heart-rate|sleep|coverage|connection|sync)|health-sync/[a-f0-9-]+)$").matches(path)
+        if (!Regex("^/(pair|device|models|settings|weather|media/images/[a-f0-9]{64}|conversations(?:/[A-Za-z0-9_-]+(?:/send)?)?|runs/[a-f0-9]+(?:/stop)?|health/(summary|heart-rate|sleep|coverage|connection|sync)|health-sync/[a-f0-9-]+)$").matches(path)
             || method !in listOf("GET", "POST", "PATCH", "DELETE")) throw IllegalArgumentException("不支持的操作")
         val cacheable = method == "GET" && (path.startsWith("/conversations") || path == "/models" || path == "/settings")
         val response: Pair<Int, String>
@@ -154,6 +239,9 @@ class MainActivity : Activity() {
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.rgb(246, 245, 240))
         web = WebView(this)
+        voice = VoiceController(this, pool, ::request) { result ->
+            if (!isDestroyed) web.evaluateJavascript("window.mobileVoice && window.mobileVoice(" + result.toString() + ")", null)
+        }
         root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -199,6 +287,7 @@ class MainActivity : Activity() {
         WebView.setWebContentsDebuggingEnabled(false)
         val assets = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
         web.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) { consumeScreenshot() }
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 return assets.shouldInterceptRequest(request.url)
                     ?: WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), "".byteInputStream())
@@ -234,5 +323,30 @@ class MainActivity : Activity() {
     }
     @Deprecated("Android compatibility")
     override fun onBackPressed() { web.evaluateJavascript("window.mobileBack && window.mobileBack()", null) }
-    override fun onDestroy() { web.destroy(); pool.shutdownNow(); super.onDestroy() }
+    override fun onResume() {
+        super.onResume()
+        consumeScreenshot()
+    }
+    private fun consumeScreenshot() {
+        if (!::web.isInitialized) return
+        web.evaluateJavascript("typeof window.mobileImage === 'function'") { ready ->
+            if (ready != "true") return@evaluateJavascript
+            val error = File(cacheDir, "screen-error.txt")
+            if (error.exists()) { imageEvent(JSONObject().put("error", error.readText())); error.delete() }
+            val screenshot = File(cacheDir, "screen-ready.jpg")
+            if (screenshot.exists()) {
+                val bytes = screenshot.readBytes(); screenshot.delete()
+                pool.execute {
+                    val result = try {
+                        val (status, body) = request("POST", "/media/images", JSONObject().put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)))
+                        if (status !in 200..299) throw IllegalStateException()
+                        JSONObject(body)
+                    } catch (_: Exception) { JSONObject().put("error", "截图上传失败，请重新截屏或上传系统截图") }
+                    imageEvent(result)
+                }
+            }
+        }
+    }
+    override fun onPause() { if (::voice.isInitialized) voice.pause(); super.onPause() }
+    override fun onDestroy() { voice.destroy(); web.destroy(); pool.shutdownNow(); super.onDestroy() }
 }

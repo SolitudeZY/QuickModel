@@ -49,13 +49,17 @@
 ### Android 个人试用端（2026-09-27）
 
 - `android/`：Kotlin + AndroidX WebKit 壳，JDK 21 / Android SDK 35 / Gradle wrapper 构建；`mobile_web/` 为触屏界面。凭据与离线缓存由 Android Keystore 加密，网页通过限定 origin 的 WebMessageListener 调用白名单路径。
-- `mobile_server/server.py`：独立 FastAPI/SQLite 服务，只提供文字聊天与健康读取，不暴露桌面工具执行。必须通过 `create_model_adapter` 工厂选择协议，不能直接实例化抽象 `ModelAdapter`。
+- `mobile_server/server.py`：独立 FastAPI/SQLite 服务，提供聊天、私有图片、健康上下文及语音 API，不暴露桌面工具执行。必须通过 `create_model_adapter` 工厂选择协议，不能直接实例化抽象 `ModelAdapter`。
 - 手机渲染复用桌面函数：修改 `app/static/render.js` 后运行 `python mobile_server/prepare_assets.py` 再构建 APK；生成的 `mobile_web/shared-render.js` 不手改，移动端在写入 DOM 前额外使用 DOMPurify。
 - Python 依赖版本仍以根 `requirements.txt` 为准，服务端部署从中提取所需子集。Android 构建：`android/gradlew.bat -p android assembleRelease`。个人签名密钥不得提交。
-- 当前手机会话保存在服务器；桌面历史仅一次性导入、手机只读，完整跨端自动同步仍未实现。临时会话不得导入；健康数据不自动加入模型上下文。
+- 当前手机会话保存在服务器；桌面历史仅一次性导入、手机只读，完整跨端自动同步仍未实现。临时会话不得导入；健康分享默认关闭；开启后按轮保存不可变快照，不改写旧消息。
 - 测试：`tests/test_mobile_server.py`、`tests/mobile_frontend.cjs`。安装与服务器操作记录见 `mobile_server/README.md`，后续路线见 `docs/android-server-health-plan.md`。
 - Android 0.2.0：WebView 必须放在原生 FrameLayout 内，由容器应用 systemBars/displayCutout/IME insets 并消费；不要直接给 WebView 加 padding。网页跟随实际 viewport，原生使用 WindowInsetsAnimation 同步键盘动画。`prepare_assets.py` 同时复制桌面 `starfield.js` 与雨滴库，生成背景文件不手改。
 - 手机设置经 `/settings` 白名单字段和 revision 校验保存到加密配置；已有模型密钥/协议字段必须保留。天气近似定位使用经过可信本机代理得到的客户端 IP，不可在服务器调用不带 IP 的地理接口而误定位为服务器所在地。
+
+- Android 0.3：`media.py` 校验并保存私有 JPEG，客户端只传附件 ID；适配器原生图像与独立视觉回退复用现有配置，编码不入会话。`health_context.py` 每轮读取健康快照，保存 `model_content` 保持历史前缀稳定。
+- `speech.py` 的百炼 ASR/TTS 密钥经 SSH `admin multimodal` 加密导入。TTS 若返回 HTTP OSS 链接，校验厂商域名后改用 HTTPS，不附带 API Key 下载音频。手机仅在前台录音，60 秒上限；截图逐次系统授权，5 秒后一次截取；视频限制 60 秒/12 帧。
+- 手机背景在 `background-viewport.js` 保持键盘前后的场景尺寸；桌面背景通过可选 viewport hook 复用，不手改生成文件。Linux shell 脚本必须 LF（`.gitattributes`）。功能推进与待真机验收见 `docs/mobile-multimodal-agent-plan.md`。
 
 ### 桌面端模块
 

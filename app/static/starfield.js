@@ -741,10 +741,16 @@ const Starfield = (() => {
     if (!reducedMotion || !reducedMotion.matches) raf = requestAnimationFrame(frame);
   }
 
+  function viewport() {
+    return typeof window.qmBackgroundViewport === 'function'
+      ? window.qmBackgroundViewport() : {width: window.innerWidth, height: window.innerHeight};
+  }
+
   function resize() {
     if (!scene || !weatherCtx) return;
-    width = Math.max(1, window.innerWidth);
-    height = Math.max(1, window.innerHeight);
+    const size = viewport();
+    width = Math.max(1, size.width);
+    height = Math.max(1, size.height);
     renderDpr = Math.min(window.devicePixelRatio || 1, currentQuality().dpr);
     baseCanvases.forEach((canvas, index) => setCanvasSize(canvas, baseContexts[index], renderDpr));
     setCanvasSize(weatherCanvas, weatherCtx, renderDpr);
@@ -874,7 +880,7 @@ const Starfield = (() => {
     else {
       weatherKindValue = nextKind;
       updateRainOptions();
-      if (enabled) { clearWeather(); lastFrameAt = 0; lastTrailAt = 0; }
+      // Updating measurements for the same weather must preserve particle trails.
     }
   }
 
@@ -900,6 +906,9 @@ const Starfield = (() => {
     if (!enabled) return;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
+      const size = viewport();
+      if (width === Math.max(1, size.width) && height === Math.max(1, size.height)
+          && renderDpr === Math.min(window.devicePixelRatio || 1, currentQuality().dpr)) return;
       const hadRain = ['rain', 'thunder'].includes(weatherKindValue);
       if (rainCanvas) rainCanvas.classList.remove('is-visible');
       if (hadRain) stopRain(true);

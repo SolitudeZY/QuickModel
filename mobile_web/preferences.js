@@ -7,6 +7,7 @@ function prefsFromForm(){
  return p;
 }
 function applyAppearance(p){
+ $('health-chat-state').textContent=p.health_context_enabled?'健康上下文已开启 · 使用最近同步记录':'';
  const period=resolveThemePeriod(p.theme_mode);document.documentElement.dataset.period=period;
  if(window.qmNativePeriod!==period){window.qmNativePeriod=period;api('/native/appearance','POST',{period}).catch(()=>{});}
  document.documentElement.style.setProperty('--chat-font-size',p.font_size+'px');

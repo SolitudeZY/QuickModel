@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {conv:null, tab:'chat', list:[], pending:null, run:null, sending:false, polling:false};
+const state = {conv:null, tab:'chat', list:[], pending:null, run:null, sending:false, polling:false, attachments:[], uploading:false,videoDescription:null};
 const waiting = new Map();
 const escapeHtml = value => String(value??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let noticeTimer;
@@ -35,7 +35,10 @@ function bubble(m){
     if(m.reasoning_content){const d=document.createElement('details'),s=document.createElement('summary'),p=document.createElement('pre');s.textContent='思考过程';p.textContent=m.reasoning_content;d.append(s,p);el.append(d);}
     const body=document.createElement('div');body.innerHTML=safeMarkdown(m.content||'');el.append(body);
     el.querySelectorAll('pre code').forEach(code=>{try{hljs.highlightElement(code);}catch(_){}});
-  }return el;
+  }
+  for(const id of m.attachments||[]){const img=document.createElement('img');img.className='attachment-preview';img.alt='图片附件';el.append(img);api('/media/images/'+id).then(r=>{img.src=r.preview;}).catch(()=>{img.alt='图片暂不可用';});}
+  if(m.health_snapshot){const h=m.health_snapshot,d=document.createElement('details'),title=document.createElement('summary'),info=document.createElement('p');title.textContent='本次健康上下文';info.textContent=h.status==='unavailable'?'本次健康记录读取失败，模型已收到缺失提示。':'读取时间：'+localTime(h.retrieved_at)+'；步数最近日期：'+(h.daily?.at(-1)?.date||'无记录')+'；心率测量时间：'+(h.latest_heart_rate?.timestamp?localTime(h.latest_heart_rate.timestamp):'无记录')+'；睡眠：'+(h.sleep?.length?'有记录':'无记录')+'。均为云端同步记录，非实时测量。';d.append(title,info);el.append(d);}
+  return el;
 }
 function renderConversation(forceScroll=false){
   const box=$('messages'), near=box.scrollHeight-box.scrollTop-box.clientHeight<100;
@@ -46,7 +49,8 @@ function renderConversation(forceScroll=false){
   const readonly=state.conv?.source==='desktop';
   $('draft').disabled=readonly||!!state.pending||!!state.run;
   $('model').disabled=!!state.pending||!!state.run;
-  $('send').disabled=readonly||state.sending||!!state.run;
+  $('send').disabled=readonly||state.sending||!!state.run||state.uploading;
+  for(const id of ['attach-image','attach-video','capture-screen'])$(id).disabled=readonly||!!state.pending||!!state.run||state.uploading;
   $('send').textContent=state.pending?'重试发送':'发送';
   $('stop').hidden=!state.run;
   $('chat-note').textContent=readonly?'桌面历史 · 只读，请新建对话继续':'会话自动保存在你的服务器';
@@ -63,20 +67,20 @@ function renderList(){
   if(!$('conversations').children.length)$('conversations').textContent='还没有对话';
 }
 async function openConversation(id){
-  if(state.pending||state.run){notice('请先等待当前回复完成，或停止生成。');return;}
+  if(state.pending||state.run||state.uploading){notice('请先等待当前回复完成，或停止生成。');return;}
   state.conv=await api('/conversations/'+id);if(state.conv.model_config)$('model').value=state.conv.model_config;
   $('drawer').close();tab('chat');renderConversation(true);
 }
 async function persistPending(){await api('/native/pending','POST',{value:JSON.stringify({pending:state.pending,run:state.run})});}
 async function send(){
   if(state.sending||state.run)return;
-  const text=$('draft').value.trim();if(!state.pending&&!text)return;
+  const text=$('draft').value.trim()||(state.attachments.length?'请分析这些图片。':'');if(state.uploading||(!state.pending&&!text))return;
   state.sending=true;$('send').disabled=true;
   try{
     if(!state.conv)state.conv=await api('/conversations','POST',{model:$('model').value});
-    if(!state.pending){state.pending={cid:state.conv.id,body:{request_id:crypto.randomUUID(),text,model:$('model').value,revision:state.conv.revision}};await persistPending();}
+    if(!state.pending){state.pending={cid:state.conv.id,body:{request_id:crypto.randomUUID(),text,model:$('model').value,revision:state.conv.revision,attachments:state.attachments.map(x=>x.id)}};await persistPending();}
     const r=await api('/conversations/'+state.pending.cid+'/send','POST',state.pending.body);
-    state.run={id:r.run_id,cid:state.pending.cid};state.pending=null;await persistPending();$('draft').value='';
+    state.run={id:r.run_id,cid:state.pending.cid};state.pending=null;await persistPending();$('draft').value='';state.attachments=[];state.videoDescription=null;renderAttachments();
     state.conv=await api('/conversations/'+state.run.cid);renderConversation(true);poll();
   }catch(e){notice(e.message);if(e.message.startsWith('409')||e.message.startsWith('413')||e.message.startsWith('400')){state.pending=null;await persistPending();if(state.conv)state.conv=await api('/conversations/'+state.conv.id);}}
   finally{state.sending=false;renderConversation();}
@@ -87,7 +91,7 @@ async function poll(){
     const r=await api('/runs/'+state.run.id);
     if(r.status!=='running'){
       const cid=state.run.cid;state.run=null;await persistPending();state.conv=await api('/conversations/'+cid);renderConversation();await refreshList();
-      if(r.error)notice(r.error);else if(r.status==='stopped')notice('已停止生成');
+      if(r.error)notice(r.error);else if(r.status==='stopped')notice('已停止生成');else if(window.qmSpeakReply)window.qmSpeakReply(state.conv.messages.at(-1)?.content||'');
     }else{
       const box=$('messages'),near=box.scrollHeight-box.scrollTop-box.clientHeight<100;
       let el=$('stream');const replacement=bubble({role:'assistant',content:r.text||'正在思考…',reasoning_content:r.reasoning});replacement.id='stream';
@@ -135,7 +139,7 @@ async function start(){
 $('connect').onclick=async()=>{$('connect').disabled=true;try{await api('/pair','POST',{code:$('code').value,name:'小米 14'});$('code').value='';await start();}catch(e){notice(e.message);}finally{$('connect').disabled=false;}};
 $('send').onclick=()=>send().catch(e=>notice(e.message));
 $('stop').onclick=()=>api('/runs/'+state.run.id+'/stop','POST').catch(e=>notice(e.message));
-$('new').onclick=()=>{if(state.run||state.pending){notice('请先完成或停止当前回复。');return;}state.conv=null;$('draft').value='';if(window.qmDefaultModel)$('model').value=window.qmDefaultModel;tab('chat');renderConversation(true);};
+$('new').onclick=()=>{if(state.run||state.pending||state.uploading){notice('请先完成或停止当前回复。');return;}state.conv=null;state.attachments=[];state.videoDescription=null;renderAttachments();$('draft').value='';if(window.qmDefaultModel)$('model').value=window.qmDefaultModel;tab('chat');renderConversation(true);};
 $('history').onclick=()=>{$('drawer').showModal();refreshList().catch(e=>notice(e.message));};$('close-history').onclick=()=>$('drawer').close();$('search').oninput=renderList;
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));$('sync').onclick=syncHealth;
 $('logout').onclick=async()=>{try{if(state.run){notice('请先停止生成');return;}await api('/device','DELETE');state.conv=null;state.pending=null;state.run=null;await start();}catch(e){notice(e.message);}};
@@ -158,3 +162,32 @@ function fitViewport(){
 }
 window.addEventListener('resize',fitViewport);window.visualViewport?.addEventListener('resize',fitViewport);
 document.addEventListener('focusin',fitViewport);document.addEventListener('focusout',fitViewport);fitViewport();
+
+function renderAttachments(){
+ $('attachments').replaceChildren();
+ for(const attachment of state.attachments){const button=document.createElement('button');button.className='attachment-chip';button.title='移除图片';const img=document.createElement('img');img.src=attachment.preview;img.alt='待发送图片';button.append(img,document.createTextNode(' ×'));button.onclick=()=>{if(state.pending)return;if(state.videoDescription){$('draft').value=$('draft').value.replace(state.videoDescription,'').trim();state.videoDescription=null;state.attachments=[];}else state.attachments=state.attachments.filter(x=>x!==attachment);renderAttachments();};$('attachments').append(button);}
+}
+window.mobileImage=result=>{
+ state.uploading=false;
+ if(result.error)notice(result.error);
+ else if(result.images){state.videoDescription=result.description;state.attachments=result.images;renderAttachments();$('draft').value=($('draft').value+'\n'+result.description).trim();notice('视频已抽帧，可添加问题后发送');}
+ else if(!result.cancelled&&result.id&&!state.attachments.some(x=>x.id===result.id)){state.attachments.push(result);renderAttachments();}
+ renderConversation();
+};
+$('attach-image').onclick=async()=>{
+ if(state.attachments.length>=4){notice('每次最多附加 4 张图片');return;}
+ state.uploading=true;renderConversation();
+ try{await api('/native/pick-image','POST');}catch(e){state.uploading=false;renderConversation();notice(e.message);}
+};
+
+$('attach-video').onclick=async()=>{
+ if(state.attachments.length){notice('请先发送或移除现有图片，再选择视频');return;}
+ state.uploading=true;renderConversation();notice('选择 60 秒以内的视频，抽帧和音轨转写可能需要约一分钟');
+ try{await api('/native/pick-video','POST');}catch(e){state.uploading=false;renderConversation();notice(e.message);}
+};
+$('capture-screen').onclick=async()=>{
+ if(state.attachments.length>=4){notice('请先发送或移除已有图片');return;}
+ notice('授权后应用会最小化，5 秒后截取一次。切到目标画面，等待后返回这里预览。');
+ state.uploading=true;renderConversation();
+ try{await api('/native/capture-screen','POST');}catch(e){state.uploading=false;renderConversation();notice(e.message);}
+};

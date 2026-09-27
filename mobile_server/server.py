@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field
 from app.model_protocol import create_model_adapter
 from mobile_server.preferences import Preferences, SavePreferences, public_settings
 from mobile_server.weather import current_weather
+from mobile_server import media, health_context, speech
+from app.config import supports_native_images
 
 ROOT = Path(os.environ.get('QM_MOBILE_DATA', '/var/lib/quickmodel-mobile'))
 ROOT.mkdir(parents=True, exist_ok=True)
@@ -258,6 +260,47 @@ class Send(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
     model: str = Field(max_length=150)
     revision: int
+    attachments: list[str] = Field(default_factory=list, max_length=12)
+
+
+class ImageUpload(BaseModel):
+    data: str = Field(max_length=1400000)
+
+
+class SpeechText(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+
+
+@app.post('/voice/asr')
+def recognize_voice(body: ImageUpload, device=Depends(auth)):
+    cfg = models_config().get('speech', {})
+    if not cfg.get('api_key'):
+        raise HTTPException(503, '服务器尚未配置语音服务')
+    try:
+        return {'text': speech.transcribe(body.data, cfg)}
+    except Exception:
+        raise HTTPException(502, '语音识别失败，请重试或使用文字输入')
+
+
+@app.post('/voice/tts')
+def speak_text(body: SpeechText, device=Depends(auth)):
+    cfg = models_config().get('speech', {})
+    if not cfg.get('api_key'):
+        raise HTTPException(503, '服务器尚未配置语音服务')
+    try:
+        return {'audio': speech.synthesize(body.text, cfg)}
+    except Exception:
+        raise HTTPException(502, '语音合成失败，文字回复仍可阅读')
+
+
+@app.post('/media/images')
+def upload_image(body: ImageUpload, device=Depends(auth)):
+    return media.save_image(ROOT, body.data)
+
+
+@app.get('/media/images/{identity}')
+def image_preview(identity: str, device=Depends(auth)):
+    return media.preview(ROOT, identity)
 
 
 def generate(rid, cid, cfg, messages, event, options=None):
@@ -291,8 +334,33 @@ def generate(rid, cid, cfg, messages, event, options=None):
     try:
         adapter = RUNNER(cfg)
         options = options or {}
+        current = messages[-1]
+        question = current['content']
+        snapshot = None
+        if options.get('health_context_enabled'):
+            try:
+                snapshot = health_context.read_snapshot()
+            except Exception:
+                snapshot = {'status': 'unavailable', 'message': '健康记录读取失败，不能假设当前健康状态'}
+            current['content'] += health_context.context_text(snapshot)
+        refs = current.get('images', [])
+        if refs and not supports_native_images(cfg):
+            vision = models_config().get('vision', {})
+            current['content'] += '\n\n[独立视觉服务对本次图片的观察]\n' + media.describe(refs, question, vision)
+            current.pop('images', None)
+        if event.is_set():
+            raise InterruptedError('Stopped before provider request')
+        # Freeze exactly what will be sent before the first provider request.
+        with LOCK, connect() as db:
+            conversation = get_conv(db, cid)
+            conversation['messages'][-1]['model_content'] = current['content']
+            if snapshot is not None:
+                conversation['messages'][-1]['health_snapshot'] = snapshot
+            if current.get('images'):
+                conversation['messages'][-1]['native_images'] = True
+            save_conv(db, conversation, conversation['revision'])
         answer = adapter.stream_round(messages, tools=[], on_text=on_text, on_thinking=on_thinking,
-                                      stop_event=event, max_tokens=options.get('max_output_tokens',4096),
+                                      stop_event=event, max_tokens=options.get('max_output_tokens',0) or None,
                                       thinking=options.get('thinking','off'),stateless=True)
         if not text:
             text = answer.assistant_message.get('content', '') or ''
@@ -332,7 +400,7 @@ def send(cid: str, body: Send, device=Depends(auth)):
     cfg = next((m for m in config['model_configs'] if m['name'] == body.model), None)
     if not cfg:
         raise HTTPException(400, '模型不存在')
-    digest = hashlib.sha256((cid + '\n' + body.model + '\n' + body.text).encode()).hexdigest()
+    digest = hashlib.sha256((cid + '\n' + body.model + '\n' + body.text + ('\n' + json.dumps(body.attachments) if body.attachments else '')).encode()).hexdigest()
     with LOCK, connect() as db:
         previous = db.execute('SELECT id,payload_hash FROM runs WHERE device=? AND request=?', (device, body.request_id)).fetchone()
         if previous:
@@ -346,11 +414,23 @@ def send(cid: str, body: Send, device=Depends(auth)):
             raise HTTPException(409, '会话已更新，请刷新后重试')
         if len(STOPS) >= 2 or db.execute("SELECT 1 FROM runs WHERE conv=? AND status='running'", (cid,)).fetchone():
             raise HTTPException(409, '已有回复正在生成，请等待或停止')
-        history = [{'role': m['role'], 'content': m.get('content', '')} for m in c['messages'] if m['role'] in ('user', 'assistant')]
-        history.append({'role': 'user', 'content': body.text})
+        refs = [media.reference(ROOT, identity) for identity in body.attachments]
+        if refs and not supports_native_images(cfg) and not config.get('vision', {}).get('api_key'):
+            raise HTTPException(400, '当前模型不支持图片，服务器也未配置独立视觉服务')
+        history = []
+        for m in c['messages']:
+            if m['role'] not in ('user', 'assistant'):
+                continue
+            item = {'role': m['role'], 'content': m.get('model_content', m.get('content', ''))}
+            if m.get('native_images'):
+                if not supports_native_images(cfg):
+                    raise HTTPException(400, '此会话包含原生图片，请使用支持图片的模型或新建会话')
+                item['images'] = [media.reference(ROOT, x) for x in m.get('attachments', [])]
+            history.append(item)
+        history.append({'role': 'user', 'content': body.text, **({'images': refs} if refs else {})})
         if len(json.dumps(history, ensure_ascii=False)) > 90000:
             raise HTTPException(413, '当前对话较长，请新建对话继续')
-        c['messages'].append({'role': 'user', 'content': body.text})
+        c['messages'].append({'role': 'user', 'content': body.text, 'attachments': body.attachments})
         c['model_config'] = body.model
         if c.get('title') == '新对话':
             c['title'] = body.text.strip()[:40]

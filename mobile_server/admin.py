@@ -11,7 +11,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 
 parser = argparse.ArgumentParser()
-parser.add_argument('action', choices=['models', 'pair', 'import', 'preferences'])
+parser.add_argument('action', choices=['models', 'pair', 'import', 'preferences', 'multimodal'])
 args = parser.parse_args()
 root = Path(os.environ.get('QM_MOBILE_DATA', '/var/lib/quickmodel-mobile'))
 root.mkdir(parents=True, exist_ok=True)
@@ -29,6 +29,15 @@ if args.action == 'models':
     sanitized['settings_revision'] = sanitized.get('settings_revision',0)+1
     (root / 'models.enc').write_bytes(Fernet(keyfile.read_bytes()).encrypt(json.dumps(sanitized).encode()))
     print('Encrypted model profiles saved:', len(sanitized['model_configs']))
+elif args.action == 'multimodal':
+    from mobile_server.server import models_config, save_models_config
+    config = models_config()
+    incoming = json.load(sys.stdin)
+    for field in ('vision', 'speech'):
+        if field in incoming:
+            config[field] = incoming[field]
+    save_models_config(config)
+    print('Encrypted multimodal configuration saved')
 elif args.action == 'preferences':
     from mobile_server.server import models_config, save_models_config
     from mobile_server.preferences import Preferences

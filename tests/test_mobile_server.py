@@ -1,4 +1,7 @@
 import hashlib
+import base64
+import io
+import copy
 import json
 import os
 import tempfile
@@ -25,7 +28,7 @@ class MobileTests(unittest.TestCase):
         self.client = TestClient(s.app)
         self.client.__enter__()
         self.cfg = patch.object(s, 'models_config', return_value={'model_configs': [{'name':'test','model':'test','api_key':'never-export'}], 'active_model_config':'test'})
-        self.cfg.start()
+        self.mock_config = self.cfg.start()
         self.token = 'unit-test-token'
         with s.connect() as db:
             db.execute('INSERT INTO devices VALUES(?,?,?)',(hashlib.sha256(self.token.encode()).hexdigest(),'test',s.now()))
@@ -60,6 +63,7 @@ class MobileTests(unittest.TestCase):
             body={'revision':0,'active_model_config':'test','preferences':public['preferences'],
                   'model_edit':{'name':'test','model':'new-model','system_prompt':'new prompt'}}
             body['preferences']['theme_mode']='night'
+            body['preferences']['max_output_tokens']=0
             saved=self.client.post('/settings',json=body)
             self.assertEqual(saved.status_code,200,saved.text)
             self.assertEqual(saved.json()['revision'],1)
@@ -100,6 +104,7 @@ class MobileTests(unittest.TestCase):
         class Fake:
             def __init__(self,cfg):pass
             def stream_round(self,messages,**kw):
+                assert kw['max_tokens'] is None
                 kw['on_text']('hello');gate.wait(2)
                 return ModelRoundResult(assistant_message={'role':'assistant','content':'hello'},usage=NormalizedUsage())
         c=self.client.post('/conversations',json={'model':'test'}).json()
@@ -118,5 +123,101 @@ class MobileTests(unittest.TestCase):
             self.assertEqual(result['status'],'done',result)
             saved=self.client.get('/conversations/'+c['id']).json()
             self.assertEqual([m['content'] for m in saved['messages']],['hi','hello'])
+
+    def wait_run(self, rid):
+        for _ in range(200):
+            result = self.client.get('/runs/'+rid).json()
+            if result['status'] != 'running':
+                self.assertEqual(result['status'], 'done', result)
+                return
+            time.sleep(.01)
+        self.fail('run did not finish')
+
+    def test_health_context_is_opt_in_and_historical_snapshot_is_immutable(self):
+        calls=[]
+        class Fake:
+            def __init__(self,cfg): pass
+            def stream_round(self,messages,**kw):
+                calls.append(copy.deepcopy(messages))
+                return ModelRoundResult(assistant_message={'role':'assistant','content':'ok'},usage=NormalizedUsage())
+        config=self.mock_config.return_value
+        config['mobile_preferences']={'health_context_enabled':True}
+        c=self.client.post('/conversations',json={'model':'test'}).json()
+        with patch.object(s,'RUNNER',Fake), patch.object(s.health_context,'read_snapshot',side_effect=[{'steps':100}, {'steps':200}]) as reader:
+            for i in range(2):
+                r=self.client.post('/conversations/'+c['id']+'/send',json={'model':'test','text':'health','revision':c['revision'],'request_id':str(i)*16})
+                self.wait_run(r.json()['run_id'])
+                c=self.client.get('/conversations/'+c['id']).json()
+            self.assertEqual(calls[0][1],calls[1][1])
+            self.assertIn('100', calls[1][1]['content'])
+            self.assertIn('200', calls[1][-1]['content'])
+            config['mobile_preferences']['health_context_enabled']=False
+            r=self.client.post('/conversations/'+c['id']+'/send',json={'model':'test','text':'plain','revision':c['revision'],'request_id':'z'*16})
+            self.wait_run(r.json()['run_id'])
+            self.assertEqual(reader.call_count,2)
+            self.assertEqual(calls[-1][-1]['content'],'plain')
+
+    def test_private_image_upload_validation_and_fallback(self):
+        from PIL import Image
+        out=io.BytesIO();Image.new('RGB',(32,24),'red').save(out,'PNG')
+        upload={'data':base64.b64encode(out.getvalue()).decode()}
+        image=self.client.post('/media/images',json=upload).json()
+        self.assertNotIn('path', image)
+        self.assertEqual(self.client.get('/media/images/'+image['id']).status_code,200)
+        self.assertEqual(self.client.post('/media/images',json={'data':'not-an-image'}).status_code,400)
+        self.client.headers.clear()
+        self.assertEqual(self.client.get('/media/images/'+image['id']).status_code,401)
+        self.client.headers['Authorization']='Bearer '+self.token
+        c=self.client.post('/conversations',json={'model':'test'}).json()
+        body={'model':'test','text':'describe','revision':c['revision'],'request_id':'v'*16,'attachments':[image['id']]}
+        self.assertEqual(self.client.post('/conversations/'+c['id']+'/send',json=body).status_code,400)
+        self.mock_config.return_value['vision']={'api_key':'secret'}
+        calls=[]
+        class Fake:
+            def __init__(self,cfg): pass
+            def stream_round(self,messages,**kw):
+                calls.append(messages)
+                return ModelRoundResult(assistant_message={'role':'assistant','content':'red'},usage=NormalizedUsage())
+        with patch.object(s,'RUNNER',Fake),patch.object(s.media,'describe',return_value='red rectangle') as vision:
+            r=self.client.post('/conversations/'+c['id']+'/send',json=body)
+            self.wait_run(r.json()['run_id'])
+            self.assertEqual(vision.call_count,1)
+            self.assertNotIn('images',calls[0][-1])
+            self.assertIn('red rectangle',calls[0][-1]['content'])
+            saved=self.client.get('/conversations/'+c['id']).json()
+            self.assertEqual(saved['messages'][0]['attachments'],[image['id']])
+            self.assertNotIn('base64',json.dumps(saved))
+
+    def test_health_missing_is_not_zero(self):
+        result=s.health_context.summarize({'summary':[{'date':'2026-01-01','steps':50}], 'sleep':[], 'heart-rate':[]})
+        self.assertIsNone(result['latest_heart_rate'])
+        self.assertEqual(result['sleep'],[])
+        self.assertIn('sleep',result['missing'])
+
+    def test_voice_routes_require_config_and_limit_text(self):
+        self.assertEqual(self.client.post('/voice/asr',json={'data':'abcd'}).status_code,503)
+        self.assertEqual(self.client.post('/voice/tts',json={'text':'a'*601}).status_code,422)
+        self.mock_config.return_value['speech']={'api_key':'never-export'}
+        with patch.object(s.speech,'transcribe',return_value='test voice'):
+            self.assertEqual(self.client.post('/voice/asr',json={'data':'abcd'}).json()['text'],'test voice')
+        with patch.object(s.speech,'synthesize',side_effect=ValueError('secret-provider-response')):
+            result=self.client.post('/voice/tts',json={'text':'hello'})
+            self.assertEqual(result.status_code,502)
+            self.assertNotIn('secret-provider-response',result.text)
+
+    def test_tts_upgrades_provider_http_oss_to_https_without_credentials(self):
+        from unittest.mock import MagicMock
+        client=MagicMock()
+        client.post.return_value.json.return_value={'output':{'audio':{'url':'http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test.wav?signature=test'}}}
+        stream=client.stream.return_value.__enter__.return_value
+        stream.iter_bytes.return_value=[b'RIFFtestWAVE']
+        with patch.object(s.speech.httpx,'Client') as factory:
+            factory.return_value.__enter__.return_value=client
+            result=s.speech.synthesize('test',{'api_key':'secret','tts_url':'https://example.test'})
+            self.assertEqual(base64.b64decode(result),b'RIFFtestWAVE')
+            self.assertEqual(client.stream.call_args.args[1],'https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/test.wav?signature=test')
+            self.assertNotIn('headers',client.stream.call_args.kwargs)
+            client.post.return_value.json.return_value={'output':{'audio':{'url':'http://127.0.0.1/private'}}}
+            with self.assertRaises(ValueError):s.speech.synthesize('test',{'api_key':'secret','tts_url':'https://example.test'})
 
 if __name__=='__main__':unittest.main()

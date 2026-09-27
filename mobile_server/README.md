@@ -21,15 +21,15 @@
 - 文字聊天、7 个现有模型、服务器持久化、停止生成、断网重连、发送请求去重。
 - 104 条桌面历史一次性导入，只读；原桌面文件未改动。完整双向自动同步未实现。
 - 最近 7 天步数、心率、睡眠；无记录不显示成零。服务器每 2 小时同步小米云端；手环仍须先经过小米运动健康上传。可手动触发同步。
-- 不将健康记录自动发送给模型；不做实时诊断/报警。附件、工具、技能、跨端记忆尚未接入。
-- 手机仅申请网络权限，不需要 Health Connect 或小米开发者账号。
+- 0.3 可开启健康上下文、图片/截图理解、短视频抽帧与分段语音；健康分享默认关闭，不做实时诊断/报警。桌面工具、技能和跨端记忆尚未接入。
+- 手机按需申请麦克风与系统截屏授权；无需 Health Connect、小米开发者账号或广泛存储权限。
 
 ## 服务与数据
 
 - API：`https://47.102.146.139/quickmodel-api/`，Apache 代理到 `127.0.0.1:18324`。保留现有 `/dav/`。
 - 服务：`quickmodel-mobile.service`；代码 `/opt/quickmodel-mobile`；独立 Python venv `/opt/quickmodel-mobile-venv`。
 - 数据：`/var/lib/quickmodel-mobile/mobile.db`；模型配置 `models.enc` 使用 `/etc/quickmodel-mobile/vault.key` 加密。SQLite 本身未加密，以服务账户权限保护。
-- 手机设备 token 只在 Android Keystore 加密存储中；最近 15 个已读取的模型/会话响应加密缓存。健康记录不离线缓存。账号 token 不进入网页 JS。
+- 手机设备 token 只在 Android Keystore 加密存储中；最近 15 个已读取的模型/会话响应加密缓存。健康面板不离线缓存；用户开启健康聊天后，已发送的健康快照随会话一起加密缓存。账号 token 不进入网页 JS。
 - 配对码经 SSH 生成、24 小时有效、一次使用；公网配对接口有尝试次数限制。所有业务接口需要 Bearer token，数据库只保存 token 哈希。
 - 健康后台：`quickmodel-health-sync.timer`，每偶数小时的 15 分附近运行；`journalctl -u quickmodel-health-sync.service` 查看结果。
 
@@ -66,3 +66,14 @@ cd android
 - 编译与签名检查通过后交付 APK；本机当前无连接的 Android 真机，安装、系统键盘和 HyperOS WebView 表现需在用户小米 14 上验收。
 
 未实现设备管理 UI；撤销令牌需 SQLite 运维或手机“断开此设备”。服务器快照备份/恢复演练和长期稳定性观察仍待完善。
+
+
+## 0.3 多模态配置与验证
+
+`admin multimodal` 从 SSH stdin 接收 `{vision: {api_key, base_url, model}, speech: {api_key, asr_url, tts_url, asr_model, tts_model, voice}}`，更新加密配置并保留现有模型/设置/设备令牌。不要把含密钥 JSON 放入仓库、命令参数或日志。新增 Pillow 依赖从根 requirements.txt 提取。
+
+`python mobile_server/smoke_multimodal.py` 使用合成色块和短句检查图片、模型、TTS/ASR；留下标记的测试会话，结束撤销临时测试设备。系统服务重启后先等待 HTTP 就绪，`systemctl active` 不等于监听端口已完成初始化。
+
+附件保存在 `/var/lib/quickmodel-mobile/media`，需要设备鉴权；数据库只保存 ID/文本快照，不保存编码。服务器备份需一并包含 media、数据库、加密配置与独立保存的解密密钥。目前尚未提供附件清理界面。
+
+完整实现状态、限制及真机验收清单见 `docs/mobile-multimodal-agent-plan.md`。语音不是双工；退出前台会停止录音。视频是稀疏抽帧，不能保证捕获快速动作。

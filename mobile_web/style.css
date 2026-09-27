@@ -10,3 +10,12 @@ button,input,textarea,select,article{background:var(--surface)}.message.user{bac
 [data-starfield=on] #messages{background:rgba(246,245,240,.65)}[data-starfield=on][data-period=night] #messages{background:rgba(13,27,39,.72)}[data-starfield=on][data-period=dusk] #messages{background:rgba(246,232,222,.68)}[data-starfield=on] #settings,[data-starfield=on] #health{background:var(--panel)}[data-starfield=on] article{background:var(--surface)}.message.assistant{background:var(--surface);padding:14px;border-radius:16px}.welcome{color:var(--ink)}@media(prefers-reduced-motion:reduce){#background-scene,.background-base,#background-rain,#starfield-canvas{transition:none}}
 
 #draft{font-size:var(--chat-font-size,15px)}
+
+/* Keep the scene stable while IME changes only the foreground viewport. */
+#background-scene,.background-base,#background-rain,#starfield-canvas,#background-lightning,.background-vignette{height:var(--scene-height,100%);bottom:auto}
+#drawer[open]{display:flex;flex-direction:column;overflow:hidden;height:85dvh}
+.drawer-head,#search{flex-shrink:0}#conversations{min-height:0;overflow:auto;overscroll-behavior:contain}
+
+.composer-tools{display:flex;gap:12px;align-items:center;margin:4px 0}.composer-tools button{padding:4px 10px;font-size:12px}.attachment-preview{display:block;max-width:240px;max-height:240px;border-radius:12px;margin:8px 0}.attachment-chip{padding:4px;margin:4px}.attachment-chip img{width:56px;height:56px;object-fit:cover;vertical-align:middle}
+
+.voice-options{font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px}.voice-options label{display:flex;align-items:center;gap:4px}.composer-tools{flex-wrap:wrap}
