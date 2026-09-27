@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tsParticles 分层雪景</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", system-ui, sans-serif;
+      color: #f5f8fa;
+      background: #15232d;
+    }
+    .scene, .snow-layer { position: fixed; inset: 0; }
+    .scene {
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 76% 14%, rgba(238, 245, 245, 0.42) 0 4%, transparent 18%),
+        linear-gradient(180deg, #172b3a 0%, #405c6b 52%, #a6b8bb 100%);
+    }
+    .haze {
+      position: absolute;
+      inset: 38% 0 0;
+      background: linear-gradient(180deg, transparent, rgba(224, 233, 232, 0.56));
+    }
+    .ridge {
+      position: absolute;
+      left: -8%;
+      bottom: 8%;
+      width: 116%;
+      height: 45%;
+      background: #c6d3d3;
+      clip-path: polygon(0 76%, 10% 52%, 17% 64%, 29% 26%, 39% 62%, 50% 38%, 62% 71%, 73% 21%, 81% 56%, 91% 36%, 100% 69%, 100% 100%, 0 100%);
+      filter: drop-shadow(0 -16px 24px rgba(21, 40, 50, 0.18));
+    }
+    .ridge::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: #e2e9e8;
+      clip-path: polygon(0 76%, 10% 52%, 17% 64%, 29% 26%, 35% 59%, 50% 38%, 62% 71%, 73% 21%, 77% 54%, 91% 36%, 100% 69%, 100% 79%, 91% 52%, 81% 68%, 73% 39%, 65% 82%, 49% 54%, 39% 76%, 29% 42%, 18% 78%, 10% 66%, 0 86%);
+    }
+    .forest {
+      position: absolute;
+      left: -2%;
+      right: -2%;
+      bottom: 0;
+      height: 31%;
+      background: #20363d;
+      opacity: 0.9;
+      clip-path: polygon(0 100%, 0 72%, 3% 35%, 5% 74%, 8% 22%, 11% 69%, 15% 41%, 18% 76%, 22% 18%, 25% 70%, 29% 39%, 33% 73%, 37% 25%, 41% 70%, 46% 42%, 50% 74%, 54% 23%, 58% 68%, 62% 37%, 66% 72%, 70% 16%, 74% 71%, 78% 34%, 82% 73%, 86% 26%, 90% 68%, 94% 38%, 97% 70%, 100% 29%, 100% 100%);
+    }
+    .ground {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 10%;
+      background: #dbe4e3;
+      box-shadow: 0 -10px 30px rgba(226, 235, 235, 0.25);
+    }
+    .snow-layer { pointer-events: none; }
+    #snow-far { z-index: 2; opacity: 0.72; }
+    #snow-mid { z-index: 3; }
+    #snow-near { z-index: 4; filter: blur(1.1px); }
+    .topbar {
+      position: fixed;
+      z-index: 10;
+      top: 0;
+      left: 0;
+      right: 0;
+      min-height: 62px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      background: rgba(15, 28, 36, 0.62);
+      border-bottom: 1px solid rgba(239, 248, 248, 0.15);
+      backdrop-filter: blur(14px);
+    }
+    .title { font-size: 14px; font-weight: 650; }
+    .source { margin-top: 2px; color: #aabcc2; font-size: 11px; }
+    .modes {
+      margin-left: auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(64px, 1fr));
+      gap: 5px;
+    }
+    button {
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: #b9c7cb;
+      background: transparent;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    button:hover, button.active {
+      color: #fff;
+      background: rgba(222, 238, 239, 0.13);
+      border-color: rgba(230, 244, 245, 0.19);
+    }
+    .caption {
+      position: fixed;
+      z-index: 10;
+      left: 24px;
+      bottom: 22px;
+      width: min(430px, calc(100% - 48px));
+      padding: 14px 16px;
+      background: rgba(13, 25, 31, 0.58);
+      border-left: 3px solid #e6f2f2;
+      backdrop-filter: blur(12px);
+    }
+    .caption strong { display: block; margin-bottom: 5px; font-size: 18px; }
+    .caption span { color: #bac8cb; font-size: 12px; line-height: 1.5; }
+    @media (max-width: 620px) {
+      .topbar { align-items: stretch; flex-direction: column; }
+      .modes { width: 100%; margin-left: 0; }
+      .caption { left: 16px; bottom: 16px; width: calc(100% - 32px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="scene">
+    <div class="haze"></div>
+    <div class="ridge"></div>
+    <div class="forest"></div>
+    <div class="ground"></div>
+  </div>
+  <div id="snow-far" class="snow-layer"></div>
+  <div id="snow-mid" class="snow-layer"></div>
+  <div id="snow-near" class="snow-layer"></div>
+
+  <header class="topbar">
+    <div>
+      <div class="title">tsParticles 分层雪景</div>
+      <div class="source">tsparticles/tsparticles · MIT · 8.9k stars</div>
+    </div>
+    <div class="modes" aria-label="降雪强度">
+      <button type="button" data-mode="gentle">小雪</button>
+      <button type="button" data-mode="steady" class="active">中雪</button>
+      <button type="button" data-mode="storm">风雪</button>
+    </div>
+  </header>
+  <div class="caption">
+    <strong id="mode-title">中雪</strong>
+    <span id="mode-detail">三层景深 · 轻微侧风 · 雪粒速度彼此独立</span>
+  </div>
+
+  <script src="vendor/tsparticles/tsparticles.slim.bundle.min.js"></script>
+  <script>
+    'use strict';
+
+    const presets = {
+      gentle: { label: '小雪', detail: '低密度 · 缓慢飘落 · 近景雪片较少', density: 0.56, speed: 0.72, drift: 0.35, direction: 'bottom-right' },
+      steady: { label: '中雪', detail: '三层景深 · 轻微侧风 · 雪粒速度彼此独立', density: 1, speed: 1, drift: 0.75, direction: 'bottom-right' },
+      storm: { label: '风雪', detail: '高密度 · 强侧风 · 近景雪片快速掠过', density: 1.48, speed: 1.7, drift: 1.8, direction: 'bottom-right' },
+    };
+
+    const layers = [
+      { id: 'snow-far', count: 112, size: [0.7, 2.1], opacity: [0.2, 0.55], speed: 0.6 },
+      { id: 'snow-mid', count: 74, size: [1.7, 4.5], opacity: [0.38, 0.82], speed: 1 },
+      { id: 'snow-near', count: 24, size: [4.5, 10], opacity: [0.3, 0.72], speed: 1.36 },
+    ];
+
+    async function renderLayer(layer, preset) {
+      return tsParticles.load({
+        id: layer.id,
+        options: {
+          fullScreen: { enable: false },
+          fpsLimit: 60,
+          detectRetina: true,
+          background: { color: 'transparent' },
+          particles: {
+            number: {
+              value: Math.round(layer.count * preset.density),
+              density: { enable: true, width: 1280, height: 720 },
+            },
+            color: { value: ['#ffffff', '#edf7f7', '#d7e7e8'] },
+            shape: { type: 'circle' },
+            opacity: {
+              value: { min: layer.opacity[0], max: layer.opacity[1] },
+              animation: { enable: true, speed: 0.28, sync: false },
+            },
+            size: { value: { min: layer.size[0], max: layer.size[1] } },
+            move: {
+              enable: true,
+              direction: preset.direction,
+              speed: { min: layer.speed * preset.speed * 0.68, max: layer.speed * preset.speed * 1.42 },
+              random: true,
+              straight: false,
+              drift: { min: -preset.drift * 0.35, max: preset.drift },
+              outModes: { default: 'out' },
+            },
+          },
+          interactivity: { detectsOn: 'window', events: { resize: { enable: true } } },
+          pauseOnBlur: true,
+          pauseOnOutsideViewport: true,
+        },
+      });
+    }
+
+    async function applyPreset(name) {
+      const preset = presets[name];
+      document.querySelectorAll('[data-mode]').forEach(button => {
+        button.classList.toggle('active', button.dataset.mode === name);
+      });
+      document.getElementById('mode-title').textContent = preset.label;
+      document.getElementById('mode-detail').textContent = preset.detail;
+      await Promise.all(layers.map(layer => renderLayer(layer, preset)));
+    }
+
+    document.querySelectorAll('[data-mode]').forEach(button => {
+      button.addEventListener('click', () => applyPreset(button.dataset.mode));
+    });
+
+    async function initialize() {
+      await loadSlim(tsParticles);
+      await applyPreset('steady');
+    }
+
+    initialize().catch(error => {
+      document.getElementById('mode-detail').textContent = `渲染失败：${error.message}`;
+      console.error(error);
+    });
+  </script>
+</body>
+</html>

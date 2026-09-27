@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>天气背景 V2</title>
+  <link rel="stylesheet" href="weather_scene_v2.css">
+  <script src="vendor/raindrop-fx/index.js" defer></script>
+  <script src="weather_scene_v2.js" defer></script>
+</head>
+<body>
+  <main id="scene" aria-label="天气背景预览">
+    <canvas class="base-canvas is-visible" id="base-a" aria-hidden="true"></canvas>
+    <canvas class="base-canvas" id="base-b" aria-hidden="true"></canvas>
+    <canvas id="rain-canvas" aria-hidden="true"></canvas>
+    <canvas id="weather-canvas" aria-hidden="true"></canvas>
+    <div id="lightning" aria-hidden="true"></div>
+    <div class="glass-reflection glass-reflection-a" aria-hidden="true"></div>
+    <div class="glass-reflection glass-reflection-b" aria-hidden="true"></div>
+    <div class="glass-vignette" aria-hidden="true"></div>
+  </main>
+
+  <header class="topbar" aria-label="预览控制">
+    <div class="segment" id="period-switch" aria-label="时段">
+      <button type="button" data-period="day" class="is-active" title="白天">白天</button>
+      <button type="button" data-period="dusk" title="黄昏">黄昏</button>
+      <button type="button" data-period="night" title="夜晚">夜晚</button>
+    </div>
+    <span class="topbar-divider" aria-hidden="true"></span>
+    <div class="segment weather-segment" id="weather-switch" aria-label="天气">
+      <button type="button" data-weather="clear" class="is-active" title="晴天"><span aria-hidden="true">☀</span><b>晴</b></button>
+      <button type="button" data-weather="cloudy" title="多云"><span aria-hidden="true">☁</span><b>云</b></button>
+      <button type="button" data-weather="rain" title="雨"><span aria-hidden="true">☂</span><b>雨</b></button>
+      <button type="button" data-weather="snow" title="雪"><span aria-hidden="true">❄</span><b>雪</b></button>
+      <button type="button" data-weather="fog" title="雾"><span aria-hidden="true">≋</span><b>雾</b></button>
+      <button type="button" data-weather="thunder" title="雷暴"><span aria-hidden="true">ϟ</span><b>雷</b></button>
+    </div>
+  </header>
+
+  <button id="panel-toggle" type="button" title="显示或隐藏效果设置" aria-controls="control-panel" aria-expanded="true">⚙</button>
+
+  <aside id="control-panel" aria-label="效果设置">
+    <div class="panel-heading">
+      <div>
+        <span class="eyebrow">ATMOSPHERE</span>
+        <h1 id="scene-title">白天 · 晴</h1>
+      </div>
+      <span class="live-dot" title="动画运行中"></span>
+    </div>
+
+    <div class="control-block">
+      <label for="intensity"><span>天气强度</span><output id="intensity-value">70%</output></label>
+      <input id="intensity" type="range" min="20" max="100" value="70" step="1">
+    </div>
+    <div class="control-block">
+      <label for="wind"><span>风速</span><output id="wind-value">45%</output></label>
+      <input id="wind" type="range" min="0" max="100" value="45" step="1">
+    </div>
+    <div class="control-block">
+      <label for="mist"><span>玻璃雾气</span><output id="mist-value">32%</output></label>
+      <input id="mist" type="range" min="0" max="100" value="32" step="1">
+    </div>
+    <div class="control-block">
+      <label for="refraction"><span>雨滴折射</span><output id="refraction-value">65%</output></label>
+      <input id="refraction" type="range" min="20" max="100" value="65" step="1">
+    </div>
+
+    <div class="panel-rule"></div>
+
+    <div class="quality-row">
+      <span>渲染质量</span>
+      <div class="segment compact" id="quality-switch" aria-label="渲染质量">
+        <button type="button" data-quality="eco">省电</button>
+        <button type="button" data-quality="balanced" class="is-active">均衡</button>
+        <button type="button" data-quality="high">精细</button>
+      </div>
+    </div>
+
+    <div class="status-grid">
+      <span>渲染器</span><strong id="renderer-status">Canvas 2D</strong>
+      <span>切换状态</span><strong id="transition-status">稳定</strong>
+      <span>帧率</span><strong id="fps-status">-- FPS</strong>
+    </div>
+  </aside>
+
+  <div class="scene-caption" aria-live="polite">
+    <span id="weather-name">晴朗</span>
+    <span id="weather-detail">清透天空与缓慢漂浮的光尘</span>
+  </div>
+</body>
+</html>

@@ -1,0 +1,1 @@
+"""QuickModel authenticated mobile service."""

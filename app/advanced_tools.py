@@ -234,6 +234,7 @@ def _summarize_text(model_config: dict, text: str, timeout_seconds: float = 120,
         "- 已经做出的关键决策及其理由\n"
         "- 已完成的改动/结论，以及尚未完成的待办\n"
         "- 工具调用得到的关键结果（如查到的目录结构、报错信息、搜索发现）\n\n"
+        "摘要请精炼，控制在约 1200 个中文字以内；优先保留未完成任务、用户约束和必要标识符，避免重复原文。\n"
         "用如下结构输出：\n"
         "## 需求与约束\n## 关键事实与标识符\n## 已完成\n## 待办/未决\n## 重要结论\n\n"
         f"对话片段：\n{text}"
@@ -249,6 +250,7 @@ def _summarize_text(model_config: dict, text: str, timeout_seconds: float = 120,
                 model_config,
                 [{"role": "user", "content": prompt}],
                 stop_event=request_stop,
+                max_tokens=2048,
             )
             if not result or not result.strip():
                 raise ValueError("摘要模型返回空内容")
@@ -292,6 +294,17 @@ def auto_compact(messages: list, model_config: dict,
     - 摘要失败则保留原始消息（不压缩），绝不用错误串替换整个中段；
     - RECENT_KEEP 提高；可用更便宜的模型（summary_client/summary_model）做摘要。
     """
+    from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+
+    total_budget = 60 if timeout_seconds is None else max(0.01, float(timeout_seconds))
+    deadline = time.monotonic() + total_budget
+    cancelled = threading.Event()
+
+    class SummaryStop:
+        def is_set(self):
+            return cancelled.is_set() or (stop_event is not None and stop_event.is_set())
+
+    summary_stop = SummaryStop()
     RECENT_KEEP = 15   # keep at most the last N messages verbatim
     CHUNK_CHARS = 60000  # 每块喂给摘要模型的字符上限
 
@@ -359,39 +372,45 @@ def auto_compact(messages: list, model_config: dict,
               for i in range(0, len(middle_text), CHUNK_CHARS)]
 
     def summarize(text):
-        nonlocal summary_config
-        if stop_event is not None and stop_event.is_set():
+        if summary_stop.is_set():
             raise InterruptedError("用户已停止上下文压缩")
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"上下文摘要超过 {total_budget:g} 秒")
         try:
             return _summarize_text(
                 summary_config, text,
-                timeout_seconds=min(120, max(0.01, deadline - time.monotonic())),
-                stop_event=stop_event,
+                timeout_seconds=min(20, max(0.01, deadline - time.monotonic())),
+                stop_event=summary_stop,
             )
         except Exception:
             if (summary_config == model_config or time.monotonic() >= deadline
-                    or (stop_event is not None and stop_event.is_set())):
+                    or summary_stop.is_set()):
                 raise
             report("fallback", "摘要模型不可用，切换当前主模型继续压缩")
-            summary_config = model_config
             return _summarize_text(
-                summary_config, text,
-                timeout_seconds=min(120, max(0.01, deadline - time.monotonic())),
-                stop_event=stop_event,
+                model_config, text,
+                timeout_seconds=min(20, max(0.01, deadline - time.monotonic())),
+                stop_event=summary_stop,
             )
 
+    pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="CompactChunk")
     try:
-        # Default budget scales with work; explicit timeouts remain total limits.
-        total_budget = (120 * (len(chunks) + (len(chunks) > 1))
-                        if timeout_seconds is None else max(0.01, float(timeout_seconds)))
-        deadline = time.monotonic() + total_budget
-        part_summaries = []
-        for i, ch in enumerate(chunks):
+        # Bound concurrency and wall time, while retaining chronological order.
+        pending = {pool.submit(summarize, ch): i for i, ch in enumerate(chunks)}
+        part_summaries = [None] * len(chunks)
+        completed = 0
+        report("progress", f"正在并发压缩 {len(chunks)} 块历史（最多 3 路）…")
+        while pending:
+            if summary_stop.is_set():
+                raise InterruptedError("用户已停止上下文压缩")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(f"上下文摘要超过 {total_budget:g} 秒")
-            report("progress", f"正在压缩第 {i + 1}/{len(chunks)} 块历史…")
-            part_summaries.append(summarize(ch))
+            done, _ = wait(pending, timeout=min(0.1, remaining), return_when=FIRST_COMPLETED)
+            for future in done:
+                part_summaries[pending.pop(future)] = future.result()
+                completed += 1
+                report("progress", f"已压缩 {completed}/{len(chunks)} 块历史…")
         if len(part_summaries) == 1:
             summary = part_summaries[0]
         else:
@@ -404,10 +423,17 @@ def auto_compact(messages: list, model_config: dict,
             summary = summarize(
                 f"以下是同一段对话按时间顺序分块得到的多份摘要，请合并为一份连贯、不丢信息的结构化摘要：\n{merged}",
             )
+        if summary_stop.is_set():
+            raise InterruptedError("用户已停止上下文压缩")
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"上下文摘要超过 {total_budget:g} 秒")
     except Exception as e:
         # 关键：摘要失败不丢中段，退化为不压缩，避免灾难性失忆
         report("failed", str(e)[:300])
         return messages
+    finally:
+        cancelled.set()
+        pool.shutdown(wait=False, cancel_futures=True)
 
     # Reassemble: system (unchanged prefix) + summary + recent tail
     compacted = list(system_msgs)

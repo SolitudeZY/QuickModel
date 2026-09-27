@@ -1,0 +1,23 @@
+[Unit]
+Description=QuickModel isolated health experiment
+After=network-online.target
+
+[Service]
+User=qmhealth
+Group=qmhealth
+WorkingDirectory=/opt/quickmodel-health-source
+Environment=HOME=/var/lib/quickmodel-health
+Environment=PYTHONPATH=/opt/quickmodel-health-source/src
+Environment=QM_HEALTH_KEY_FILE=/etc/quickmodel-health/vault.key
+ExecStart=/opt/quickmodel-health-venv/bin/uvicorn lab:app --host 127.0.0.1 --port 18323 --no-access-log --log-level critical
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/quickmodel-health
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

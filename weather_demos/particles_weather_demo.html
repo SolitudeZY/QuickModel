@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>particles.js · 粒子天气</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", system-ui, sans-serif;
+      color: #eaf3ff;
+      background: #08121e;
+    }
+    .scene {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at 68% 24%, rgba(65, 139, 176, 0.28), transparent 34%),
+        radial-gradient(circle at 28% 76%, rgba(78, 102, 155, 0.20), transparent 36%),
+        linear-gradient(155deg, #07111d 0%, #10263b 55%, #192e43 100%);
+    }
+    .particles-layer { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; }
+    .aurora {
+      position: fixed;
+      z-index: 0;
+      left: 8%;
+      right: 8%;
+      top: 24%;
+      height: 34%;
+      background: linear-gradient(100deg, transparent, rgba(62, 180, 174, 0.12), rgba(91, 119, 205, 0.15), transparent);
+      filter: blur(28px);
+      transform: skewY(-8deg);
+    }
+    .topbar {
+      position: relative;
+      z-index: 3;
+      min-height: 58px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      background: rgba(7, 15, 26, 0.70);
+      border-bottom: 1px solid rgba(177, 210, 239, 0.15);
+      backdrop-filter: blur(12px);
+    }
+    .title { font-size: 14px; font-weight: 650; }
+    .source { color: #8ea5b9; font-size: 11px; margin-top: 2px; }
+    .modes { margin-left: auto; display: flex; gap: 5px; }
+    button {
+      min-height: 34px;
+      padding: 6px 11px;
+      color: #a9bfd1;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    button:hover, button.active { color: #fff; background: rgba(109, 191, 211, 0.13); border-color: rgba(157, 218, 232, 0.18); }
+    .readout {
+      position: fixed;
+      z-index: 2;
+      left: 34px;
+      bottom: 30px;
+      max-width: 480px;
+      padding-left: 14px;
+      border-left: 3px solid #70c2d3;
+      text-shadow: 0 2px 14px rgba(0, 0, 0, 0.45);
+    }
+    .readout strong { display: block; font-size: 24px; margin-bottom: 5px; }
+    .readout span { color: #aec3d4; font-size: 12px; }
+    @media (max-width: 620px) {
+      .topbar { align-items: flex-start; flex-wrap: wrap; }
+      .modes { margin-left: 0; width: 100%; }
+      .modes button { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="scene"></div>
+  <div class="aurora"></div>
+  <canvas class="particles-layer"></canvas>
+  <header class="topbar">
+    <div>
+      <div class="title">particles.js · 粒子天气</div>
+      <div class="source">marcbruederlin/particles.js · MIT · 1.7k stars</div>
+    </div>
+    <div class="modes">
+      <button type="button" data-mode="mist">冰雾</button>
+      <button type="button" data-mode="frost" class="active">冰晶</button>
+      <button type="button" data-mode="storm">风雪</button>
+    </div>
+  </header>
+  <div class="readout">
+    <strong id="mode-title">冰晶</strong>
+    <span id="mode-meta">130 个响应式 Canvas 粒子 · 无外部依赖</span>
+  </div>
+
+  <script src="vendor/particles/particles.min.js"></script>
+  <script>
+    'use strict';
+    const presets = {
+      mist: { label: '冰雾', count: 58, size: 5, speed: 0.22, colors: ['#8fc6d8', '#d3e7ef'], meta: '58 个慢速粒子 · 低干扰背景' },
+      frost: { label: '冰晶', count: 130, size: 4, speed: 0.62, colors: ['#79d1df', '#dceeff', '#9aaee8'], meta: '130 个响应式 Canvas 粒子 · 无外部依赖' },
+      storm: { label: '风雪', count: 230, size: 3, speed: 1.65, colors: ['#dceeff', '#9dd9e5', '#ffffff'], meta: '230 个高速粒子 · 高密度动态效果' },
+    };
+    let initialized = false;
+
+    function applyPreset(name) {
+      if (initialized) {
+        Particles.destroy();
+        const canvas = document.createElement('canvas');
+        canvas.className = 'particles-layer';
+        document.body.insertBefore(canvas, document.querySelector('.topbar'));
+      }
+      const preset = presets[name];
+      Particles.init({
+        selector: '.particles-layer',
+        maxParticles: preset.count,
+        sizeVariations: preset.size,
+        speed: preset.speed,
+        color: preset.colors,
+        connectParticles: false,
+        responsive: [
+          { breakpoint: 720, options: { maxParticles: Math.round(preset.count * 0.58), sizeVariations: preset.size } },
+        ],
+      });
+      initialized = true;
+      document.querySelectorAll('[data-mode]').forEach(button => button.classList.toggle('active', button.dataset.mode === name));
+      document.getElementById('mode-title').textContent = preset.label;
+      document.getElementById('mode-meta').textContent = preset.meta;
+    }
+
+    document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => applyPreset(button.dataset.mode)));
+    applyPreset('frost');
+  </script>
+</body>
+</html>

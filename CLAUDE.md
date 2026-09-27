@@ -46,6 +46,19 @@
 
 ## 架构
 
+### Android 个人试用端（2026-09-27）
+
+- `android/`：Kotlin + AndroidX WebKit 壳，JDK 21 / Android SDK 35 / Gradle wrapper 构建；`mobile_web/` 为触屏界面。凭据与离线缓存由 Android Keystore 加密，网页通过限定 origin 的 WebMessageListener 调用白名单路径。
+- `mobile_server/server.py`：独立 FastAPI/SQLite 服务，只提供文字聊天与健康读取，不暴露桌面工具执行。必须通过 `create_model_adapter` 工厂选择协议，不能直接实例化抽象 `ModelAdapter`。
+- 手机渲染复用桌面函数：修改 `app/static/render.js` 后运行 `python mobile_server/prepare_assets.py` 再构建 APK；生成的 `mobile_web/shared-render.js` 不手改，移动端在写入 DOM 前额外使用 DOMPurify。
+- Python 依赖版本仍以根 `requirements.txt` 为准，服务端部署从中提取所需子集。Android 构建：`android/gradlew.bat -p android assembleRelease`。个人签名密钥不得提交。
+- 当前手机会话保存在服务器；桌面历史仅一次性导入、手机只读，完整跨端自动同步仍未实现。临时会话不得导入；健康数据不自动加入模型上下文。
+- 测试：`tests/test_mobile_server.py`、`tests/mobile_frontend.cjs`。安装与服务器操作记录见 `mobile_server/README.md`，后续路线见 `docs/android-server-health-plan.md`。
+- Android 0.2.0：WebView 必须放在原生 FrameLayout 内，由容器应用 systemBars/displayCutout/IME insets 并消费；不要直接给 WebView 加 padding。网页跟随实际 viewport，原生使用 WindowInsetsAnimation 同步键盘动画。`prepare_assets.py` 同时复制桌面 `starfield.js` 与雨滴库，生成背景文件不手改。
+- 手机设置经 `/settings` 白名单字段和 revision 校验保存到加密配置；已有模型密钥/协议字段必须保留。天气近似定位使用经过可信本机代理得到的客户端 IP，不可在服务器调用不带 IP 的地理接口而误定位为服务器所在地。
+
+### 桌面端模块
+
 - `main.py` — pywebview 窗口入口
 - `app/webview_app.py` — Python↔JS 桥（`API` 类），消息构建、Agent 生命周期
 - `app/agent.py` — `Agent` 类，工具循环、上下文压缩、调用 `dispatch`
@@ -111,7 +124,7 @@ vendor/* → core.js → render.js → drag.js → dialogs.js → settings.js �
 - 缓存优化：图片 Base64 **不进入持久会话、文本摘要或工具返回文本**。原生多模态模型仅在请求边界通过图片内容块接收编码；纯文本模型继续使用独立视觉工具。`TOOLS_SCHEMA`、system prompt 作为稳定前缀以命中 prompt cache。
 - **prompt cache 前缀稳定铁律（重要）**：DeepSeek 等 prompt cache 从头逐 token 比对前缀，遇到第一个不同 token 即从该点起全部 miss 重算。因此**绝不就地改写任何已发送过的历史消息内容**——一旦某条消息以某形态发给过 API，之后必须保持该形态。压缩历史只能用 `auto_compact`（超阈值时一次性折叠中段为摘要、保留 system 头 + 近期尾，低频、一次性失效后前缀重新稳定）。
   - ⚠ **已移除 microcompact**（曾在 `_manage_context` 每轮调用）：它按"距末尾 N 条"的滑动窗口就地把窗口外旧工具结果改写成 `[已压缩]`，但窗口边界随消息增长右移，导致位于前缀中间的历史消息被反复改写 → 每次都从该点截断缓存前缀。表现为**工具调用越多、缓存命中率越低**。教训：任何"随轮次移动的就地改写"都与 prompt cache 冲突，宁可多花上下文 token 也要保前缀稳定（DeepSeek 缓存 token 仅为 miss 的约 1/10）。
-  - **`auto_compact` 实现要点（`advanced_tools.py`，v1.7.4 大改，修复"压缩后失忆"）**：超 `compact_threshold` 时把 `system 头 + 中段摘要 + 近期尾` 重组；近期尾最多保留 15 条，并按阈值的 token 预算动态收缩，避免最近的大工具结果独占上下文、导致无中段可压缩。中段**分块摘要**（每块 ≤60000 字符逐块总结，多块再合并）——⚠ 旧实现是 `json.dumps(middle)[-80000:]` 只取尾部 8 万字符喂摘要，**中段一长前半段直接丢弃 → 失忆主因**（DeepSeek 爱"说一句→调几次工具"，工具结果堆满中段极易触发）。摘要 prompt 结构化、强制保留可继续工作的具体事实（文件路径/函数名/变量名原样、需求约束、决策、待办、工具关键结果）。**摘要失败必须 `return messages` 退化为不压缩**，绝不用错误串替换整个中段；自动压缩开始/成功/失败须经 Notice 告知用户，每次摘要请求最多 120 秒，默认总预算按分块及合并请求数量计算，显式 timeout_seconds 仍表示整个流程的总预算；显示分块/合并进度且响应停止按钮，同一次 Agent run 失败后不重复尝试。手动压缩失败时只能更新尚未发送的工具占位结果，绝不能 `clear()` 原消息。摘要走便宜模型：`agent._summary_model_config()` 优先取配置里名字含 `flash` 的模型，回退主模型。压缩结果经 `_on_done` 持久化回会话，下次从压缩后版本继续。
+  - **`auto_compact` 实现要点（`advanced_tools.py`，v1.7.4 大改，修复"压缩后失忆"）**：超 `compact_threshold` 时把 `system 头 + 中段摘要 + 近期尾` 重组；近期尾最多保留 15 条，并按阈值的 token 预算动态收缩，避免最近的大工具结果独占上下文、导致无中段可压缩。中段**分块摘要**（每块 ≤60000 字符逐块总结，多块再合并）——⚠ 旧实现是 `json.dumps(middle)[-80000:]` 只取尾部 8 万字符喂摘要，**中段一长前半段直接丢弃 → 失忆主因**（DeepSeek 爱"说一句→调几次工具"，工具结果堆满中段极易触发）。摘要 prompt 结构化、强制保留可继续工作的具体事实（文件路径/函数名/变量名原样、需求约束、决策、待办、工具关键结果）。**摘要失败必须 `return messages` 退化为不压缩**，绝不用错误串替换整个中段；自动压缩开始/成功/失败须经 Notice 告知用户，每次摘要请求最多 20 秒、输出上限 2048 tokens，分块最多 3 路并发且按原始顺序合并，默认全流程总预算固定 60 秒（不随块数增长），显式 timeout_seconds 仍表示整个流程的总预算；显示分块/合并进度且响应停止按钮，同一次 Agent run 失败后不重复尝试；压缩后仍超过阈值则保留历史并暂停生成，不得继续发送超长请求。成功缩至阈值内后允许本次 run 再次增长时重新压缩，并清除 Responses 服务端续接状态。压缩阈值最多为模型窗口的 60%，发送前含系统提示和工具定义的估算不得超过窗口的 80%（预留输出与估算误差）。手动压缩失败时只能更新尚未发送的工具占位结果，绝不能 `clear()` 原消息。摘要走便宜模型：`agent._summary_model_config()` 优先取配置里名字含 `flash` 的模型，回退主模型。压缩结果经 `_on_done` 持久化回会话，下次从压缩后版本继续。
 
 ## 图片理解（原生多模态 + 独立视觉工具）
 

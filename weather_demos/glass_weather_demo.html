@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>玻璃天气实验室</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Segoe UI", "PingFang SC", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { color: #eef5f7; background: #071116; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+    .topbar {
+      position: fixed;
+      z-index: 3;
+      top: 18px;
+      left: 50%;
+      min-width: 184px;
+      padding: 4px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3px;
+      transform: translateX(-50%);
+      border: 1px solid rgba(226, 240, 243, 0.16);
+      border-radius: 8px;
+      background: rgba(7, 17, 22, 0.56);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+      backdrop-filter: blur(16px);
+    }
+    button, input { font: inherit; }
+    .mode-button {
+      min-height: 34px;
+      padding: 6px 16px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      color: #aebdc1;
+      background: transparent;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .mode-button:hover { color: #fff; }
+    .mode-button.active {
+      color: #fff;
+      border-color: rgba(229, 241, 243, 0.14);
+      background: rgba(223, 237, 240, 0.14);
+    }
+    .identity {
+      position: fixed;
+      z-index: 3;
+      left: 22px;
+      bottom: 20px;
+      pointer-events: none;
+      text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+    }
+    .identity strong { display: block; font-size: 17px; font-weight: 620; }
+    .identity span { display: block; margin-top: 4px; color: rgba(233, 242, 243, 0.68); font-size: 11px; }
+    .panel-toggle {
+      position: fixed;
+      z-index: 5;
+      top: 18px;
+      right: 18px;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(229, 241, 243, 0.17);
+      border-radius: 8px;
+      color: #edf5f6;
+      background: rgba(7, 17, 22, 0.56);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(16px);
+      cursor: pointer;
+    }
+    .panel-toggle:hover { background: rgba(26, 43, 49, 0.72); }
+    .sliders-icon { width: 19px; height: 17px; display: grid; align-content: space-between; }
+    .sliders-icon i { position: relative; display: block; height: 1px; background: currentColor; }
+    .sliders-icon i::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      width: 5px;
+      height: 5px;
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      background: #22363d;
+      transform: translateY(-50%);
+    }
+    .sliders-icon i:nth-child(1)::after { left: 3px; }
+    .sliders-icon i:nth-child(2)::after { right: 2px; }
+    .sliders-icon i:nth-child(3)::after { left: 8px; }
+    .panel {
+      position: fixed;
+      z-index: 4;
+      top: 70px;
+      right: 18px;
+      width: min(310px, calc(100% - 36px));
+      max-height: calc(100% - 92px);
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid rgba(226, 240, 243, 0.16);
+      border-radius: 8px;
+      background: rgba(8, 19, 24, 0.76);
+      box-shadow: 0 20px 56px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(22px);
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-8px);
+      transition: opacity 180ms ease, transform 180ms ease, visibility 180ms;
+    }
+    .panel.open { opacity: 1; visibility: visible; transform: translateY(0); }
+    .panel h1 { margin: 0 0 16px; font-size: 14px; font-weight: 620; letter-spacing: 0; }
+    .control { margin-bottom: 14px; }
+    .control-header { margin-bottom: 7px; display: flex; justify-content: space-between; gap: 12px; }
+    .control label { color: #ccd9dc; font-size: 11px; }
+    .value { min-width: 38px; color: #8fa4a9; font-size: 10px; text-align: right; }
+    input[type="range"] {
+      width: 100%;
+      height: 3px;
+      display: block;
+      border-radius: 2px;
+      appearance: none;
+      background: rgba(227, 241, 243, 0.17);
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      width: 13px;
+      height: 13px;
+      border: 1px solid rgba(255, 255, 255, 0.65);
+      border-radius: 50%;
+      appearance: none;
+      background: #d9e7e9;
+      box-shadow: 0 2px 7px rgba(0, 0, 0, 0.28);
+      cursor: pointer;
+    }
+    select {
+      width: 100%;
+      min-height: 34px;
+      padding: 6px 9px;
+      border: 1px solid rgba(224, 239, 241, 0.17);
+      border-radius: 6px;
+      color: #e9f2f3;
+      background: #18292f;
+      font-size: 11px;
+      outline: none;
+    }
+    .media-actions { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .media-button {
+      min-height: 36px;
+      padding: 7px 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(224, 239, 241, 0.17);
+      border-radius: 6px;
+      color: #e9f2f3;
+      background: rgba(216, 234, 237, 0.08);
+      font-size: 11px;
+      text-align: center;
+      cursor: pointer;
+    }
+    .media-button:hover { background: rgba(216, 234, 237, 0.14); }
+    .file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    .media-name {
+      margin-top: 9px;
+      overflow: hidden;
+      color: #7f969c;
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .drop-active::after {
+      content: "释放文件以更换背景";
+      position: fixed;
+      z-index: 8;
+      inset: 18px;
+      display: grid;
+      place-items: center;
+      border: 1px dashed rgba(238, 248, 249, 0.7);
+      border-radius: 8px;
+      color: #fff;
+      background: rgba(5, 14, 18, 0.62);
+      font-size: 14px;
+      backdrop-filter: blur(12px);
+      pointer-events: none;
+    }
+    .error {
+      position: fixed;
+      z-index: 10;
+      inset: 0;
+      padding: 24px;
+      display: none;
+      place-items: center;
+      color: #e9f2f3;
+      background: #101a1f;
+      text-align: center;
+    }
+    @media (max-width: 560px) {
+      .topbar { top: 12px; }
+      .panel-toggle { top: 12px; right: 12px; }
+      .panel { top: 62px; right: 12px; width: calc(100% - 24px); max-height: calc(100% - 74px); }
+      .identity { left: 16px; bottom: 14px; }
+    }
+  </style>
+</head>
+<body data-mode="rain">
+  <canvas id="weather-canvas"></canvas>
+
+  <div class="topbar" aria-label="天气模式">
+    <button type="button" class="mode-button active" data-mode="rain">雨窗</button>
+    <button type="button" class="mode-button" data-mode="snow">雪窗</button>
+  </div>
+
+  <div class="identity">
+    <strong id="scene-title">雨落在玻璃上</strong>
+    <span id="scene-subtitle">原创 WebGL2 高度场 · 实时折射与反光</span>
+  </div>
+
+  <button type="button" class="panel-toggle" id="panel-toggle" title="效果设置" aria-label="打开效果设置" aria-expanded="false">
+    <span class="sliders-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+  </button>
+
+  <aside class="panel" id="panel" aria-label="效果设置">
+    <h1>玻璃与天气</h1>
+    <div class="control">
+      <div class="control-header"><label for="quality">渲染质量</label><span class="value">后台效果</span></div>
+      <select id="quality">
+        <option value="smooth" selected>流畅 · 24 FPS</option>
+        <option value="balanced">平衡 · 30 FPS</option>
+        <option value="detail">精细 · 45 FPS</option>
+      </select>
+    </div>
+    <div class="control">
+      <div class="control-header"><label for="intensity">天气强度</label><span class="value" data-value="intensity"></span></div>
+      <input id="intensity" data-uniform="intensity" type="range" min="0" max="2" step="0.01" value="1.05">
+    </div>
+    <div class="control">
+      <div class="control-header"><label for="fog">玻璃雾气</label><span class="value" data-value="fog"></span></div>
+      <input id="fog" data-uniform="fog" type="range" min="0" max="1" step="0.01" value="0.46">
+    </div>
+    <div class="control">
+      <div class="control-header"><label for="refraction">折射强度</label><span class="value" data-value="refraction"></span></div>
+      <input id="refraction" data-uniform="refraction" type="range" min="0" max="2" step="0.01" value="1.08">
+    </div>
+    <div class="control">
+      <div class="control-header"><label for="reflection">玻璃反光</label><span class="value" data-value="reflection"></span></div>
+      <input id="reflection" data-uniform="reflection" type="range" min="0" max="1.5" step="0.01" value="0.72">
+    </div>
+    <div class="control">
+      <div class="control-header"><label for="wind">风向与风速</label><span class="value" data-value="wind"></span></div>
+      <input id="wind" data-uniform="wind" type="range" min="-1.5" max="1.5" step="0.01" value="0.32">
+    </div>
+    <div class="control">
+      <div class="control-header"><label for="motion">滑落与飘落速度</label><span class="value" data-value="motion"></span></div>
+      <input id="motion" data-uniform="motion" type="range" min="0.2" max="1.8" step="0.01" value="0.82">
+    </div>
+    <div class="media-actions">
+      <label class="media-button" for="media-input">上传图片或视频</label>
+      <button type="button" class="media-button" id="reset-media">恢复流体背景</button>
+    </div>
+    <input class="file-input" id="media-input" type="file" accept="image/*,video/*">
+    <div class="media-name" id="media-name">程序化双色流体</div>
+  </aside>
+
+  <div class="error" id="error">当前浏览器不支持 WebGL2，无法运行这个 Demo。</div>
+
+  <script>
+    'use strict';
+
+    const canvas = document.getElementById('weather-canvas');
+    const errorOverlay = document.getElementById('error');
+    function showError(message) {
+      errorOverlay.textContent = message;
+      errorOverlay.style.display = 'grid';
+      console.error(message);
+    }
+    const gl = canvas.getContext('webgl2', {
+      alpha: false,
+      antialias: false,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: true,
+    });
+
+    if (!gl) {
+      showError('当前浏览器不支持 WebGL2，无法运行这个 Demo。');
+      throw new Error('WebGL2 is unavailable');
+    }
+
+    const vertexSource = `#version 300 es
+      in vec2 a_position;
+      out vec2 v_uv;
+      void main() {
+        v_uv = a_position * 0.5 + 0.5;
+        gl_Position = vec4(a_position, 0.0, 1.0);
+      }
+    `;
+
+    const fragmentSource = `#version 300 es
+      precision highp float;
+
+      in vec2 v_uv;
+      out vec4 outColor;
+
+      uniform vec2 u_resolution;
+      uniform float u_time;
+      uniform float u_mode;
+      uniform float u_intensity;
+      uniform float u_fog;
+      uniform float u_refraction;
+      uniform float u_reflection;
+      uniform float u_wind;
+      uniform float u_motion;
+      uniform float u_hasMedia;
+      uniform float u_mediaAspect;
+      uniform sampler2D u_media;
+
+      const float PI = 3.14159265359;
+
+      float hash21(vec2 p) {
+        p = fract(p * vec2(123.34, 456.21));
+        p += dot(p, p + 45.32);
+        return fract(p.x * p.y);
+      }
+
+      float valueNoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x),
+                   mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0)), f.x), f.y);
+      }
+
+      float fbm(vec2 p) {
+        float sum = 0.0;
+        float amplitude = 0.52;
+        mat2 turn = mat2(0.82, -0.57, 0.57, 0.82);
+        for (int i = 0; i < 4; i++) {
+          sum += valueNoise(p) * amplitude;
+          p = turn * p * 2.03 + 11.7;
+          amplitude *= 0.5;
+        }
+        return sum;
+      }
+
+      vec2 coverUv(vec2 uv) {
+        float screenAspect = u_resolution.x / max(u_resolution.y, 1.0);
+        vec2 mediaUv = uv;
+        if (screenAspect > u_mediaAspect) {
+          mediaUv.y = 0.5 + (uv.y - 0.5) * u_mediaAspect / screenAspect;
+        } else {
+          mediaUv.x = 0.5 + (uv.x - 0.5) * screenAspect / u_mediaAspect;
+        }
+        return vec2(mediaUv.x, 1.0 - mediaUv.y);
+      }
+
+      vec3 fluidScene(vec2 uv) {
+        vec2 p = uv - 0.5;
+        p.x *= u_resolution.x / max(u_resolution.y, 1.0);
+        float t = u_time * 0.08;
+        float warpA = fbm(p * 2.2 + vec2(t, -t * 0.7));
+        float warpB = fbm(p * 3.1 + vec2(-t * 0.5, t) + warpA * 1.7);
+        float ribbons = 0.5 + 0.5 * sin(p.x * 2.5 - p.y * 3.1 + warpB * 5.2 + t * 2.0);
+        vec3 rainDark = vec3(0.025, 0.075, 0.105);
+        vec3 rainLight = vec3(0.17, 0.40, 0.46);
+        vec3 snowDark = vec3(0.13, 0.20, 0.24);
+        vec3 snowLight = vec3(0.48, 0.62, 0.65);
+        vec3 low = mix(rainDark, snowDark, u_mode);
+        vec3 high = mix(rainLight, snowLight, u_mode);
+        vec3 color = mix(low, high, smoothstep(0.12, 0.95, ribbons * 0.62 + warpA * 0.45));
+        float glow = exp(-9.0 * length(p - vec2(0.38, 0.2 + 0.08 * sin(t))));
+        color += mix(vec3(0.28, 0.19, 0.13), vec3(0.30, 0.38, 0.40), u_mode) * glow;
+        return color;
+      }
+
+      vec3 sceneSample(vec2 uv) {
+        uv = clamp(uv, 0.001, 0.999);
+        return u_hasMedia > 0.5 ? texture(u_media, coverUv(uv)).rgb : fluidScene(uv);
+      }
+
+      float staticDrops(vec2 uv) {
+        vec2 aspect = vec2(u_resolution.x / max(u_resolution.y, 1.0), 1.0);
+        vec2 p = uv * aspect * 35.0;
+        vec2 id = floor(p);
+        vec2 q = fract(p) - 0.5;
+        float rnd = hash21(id);
+        vec2 center = vec2(hash21(id + 3.7) - 0.5, hash21(id + 8.1) - 0.5) * 0.62;
+        float radius = mix(0.035, 0.14, rnd * rnd);
+        vec2 delta = q - center;
+        float domeDistance = length(vec2(delta.x, delta.y * mix(0.82, 1.12, hash21(id + 11.2))));
+        float dome = pow(max(0.0, 1.0 - smoothstep(0.0, radius, domeDistance)), 0.72);
+        float probability = clamp(0.28 + u_intensity * 0.22, 0.28, 0.72);
+        float activeMask = 1.0 - smoothstep(probability, probability + 0.1, rnd);
+        return dome * activeMask;
+      }
+
+      float movingDrops(vec2 uv, float scale, float speed, float seed) {
+        float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+        vec2 p = uv * vec2(aspect, 1.0) * scale;
+        float laneId = floor(p.x);
+        float laneRandom = hash21(vec2(laneId, seed));
+        float laneRate = mix(0.58, 1.72, laneRandom);
+        float rawTravel = u_time * speed * u_motion * laneRate + laneRandom * 5.3;
+        float travelIndex = floor(rawTravel);
+        float travelPhase = fract(rawTravel);
+        float holdEnd = mix(0.16, 0.52, hash21(vec2(laneId + travelIndex, seed + 7.8)));
+        float slidePhase = smoothstep(holdEnd, 1.0, travelPhase);
+        float continuousTravel = travelIndex + slidePhase;
+        float sliding = smoothstep(holdEnd, min(holdEnd + 0.1, 0.88), travelPhase)
+                      * (1.0 - smoothstep(0.9, 1.0, travelPhase));
+        p.y += continuousTravel;
+
+        vec2 id = floor(p);
+        vec2 q = fract(p) - 0.5;
+        float rnd = hash21(id + seed);
+        float pathBend = sin(continuousTravel * 0.82 + rnd * PI * 2.0) * 0.036;
+        float windSway = sin(continuousTravel * 0.4 + laneRandom * PI * 2.0) * u_wind * 0.024;
+        vec2 center = vec2((hash21(id + seed + 2.4) - 0.5) * 0.66 + pathBend + windSway,
+                           mix(-0.16, 0.14, hash21(id + seed + 12.1)));
+        vec2 d = q - center;
+        float baseRadius = mix(0.062, 0.145, hash21(id + seed + 5.2));
+
+        float satellitePhase = fract(continuousTravel * 1.37 + hash21(id + seed + 19.4));
+        float satelliteY = mix(0.18, baseRadius * 0.72, satellitePhase);
+        float mergePulse = 1.0 - smoothstep(baseRadius * 0.78, baseRadius * 1.8, satelliteY);
+        float bodyRadius = baseRadius * (1.0 + mergePulse * 0.16);
+        float taper = 1.0 + max(d.y, 0.0) * 2.4;
+        float bodyDistance = length(vec2(d.x * taper, d.y * 0.76));
+        float body = pow(max(0.0, 1.0 - smoothstep(0.0, bodyRadius, bodyDistance)), 0.7);
+
+        float trailWindow = step(0.0, d.y) * (1.0 - smoothstep(bodyRadius * 0.6, 0.22, d.y));
+        float trailPath = sin((d.y + rnd) * 13.0 + continuousTravel * 0.8) * 0.018 + u_wind * d.y * 0.018;
+        float trailWidth = bodyRadius * mix(0.10, 0.19, rnd);
+        float trailDistance = abs(d.x - trailPath);
+        float trailPresence = mix(0.18, 1.0, sliding);
+        float trail = pow(max(0.0, 1.0 - smoothstep(0.0, trailWidth, trailDistance)), 0.8) * trailWindow * trailPresence;
+
+        float satellitePath = sin((satelliteY + rnd) * 13.0 + continuousTravel * 0.8) * 0.018 + u_wind * satelliteY * 0.018;
+        float satelliteRadius = mix(bodyRadius * 0.14, bodyRadius * 0.27, hash21(id + seed + 25.3));
+        float satelliteDistance = length(d - vec2(satellitePath, satelliteY));
+        float satellite = pow(max(0.0, 1.0 - smoothstep(0.0, satelliteRadius, satelliteDistance)), 0.76);
+
+        float remnantPattern = pow(max(0.0, sin((d.y + rnd) * 48.0)), 10.0);
+        float remnants = trail * remnantPattern * 0.52;
+        float probability = clamp(0.26 + u_intensity * 0.29, 0.26, 0.82);
+        float activeMask = 1.0 - smoothstep(probability, probability + 0.1, rnd);
+        return max(body, max(trail * 0.26, max(satellite * 0.82, remnants))) * activeMask;
+      }
+
+      float rainHeight(vec2 uv) {
+        float amount = clamp(u_intensity, 0.0, 2.0);
+        float fine = staticDrops(uv) * smoothstep(0.08, 0.58, amount);
+        float layerA = movingDrops(uv, 8.2, 0.16 + amount * 0.04, 2.0);
+        float layerB = movingDrops(uv + vec2(0.07, 0.02), 14.5, 0.095 + amount * 0.024, 17.0);
+        return clamp(max(fine * 0.46, max(layerA, layerB * 0.68)), 0.0, 1.0);
+      }
+
+      float snowLayer(vec2 uv, float scale, float speed, float radius, float seed) {
+        float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+        vec2 p = uv * vec2(aspect, 1.0) * scale;
+        p.y += u_time * speed * u_motion;
+        p.x -= u_time * u_wind * speed * u_motion * 0.22;
+        vec2 id = floor(p);
+        vec2 q = fract(p) - 0.5;
+        float rnd = hash21(id + seed);
+        vec2 offset = vec2(hash21(id + seed + 4.1) - 0.5, hash21(id + seed + 9.7) - 0.5) * 0.62;
+        q -= offset;
+        q.x += sin(u_time * (0.45 + rnd * 0.6) + rnd * PI * 2.0) * (0.05 + abs(u_wind) * 0.045);
+        float size = radius * mix(0.6, 1.34, rnd);
+        float core = smoothstep(size, size * 0.12, length(q));
+        float sparkleEnvelope = smoothstep(size * 2.1, size * 0.35, length(q));
+        float sparkle = smoothstep(size * 0.32, 0.0, min(abs(q.x), abs(q.y))) * sparkleEnvelope * 0.22;
+        return max(core, sparkle) * smoothstep(0.18, 0.78, rnd + u_intensity * 0.2);
+      }
+
+      vec3 addSnow(vec3 scene, vec2 uv) {
+        float amount = clamp(u_intensity, 0.0, 2.0);
+        float farSnow = snowLayer(uv, 27.0, 0.19 + amount * 0.06, 0.055, 3.0);
+        float midSnow = snowLayer(uv + vec2(0.1, 0.0), 16.0, 0.28 + amount * 0.09, 0.072, 13.0);
+        float nearSnow = snowLayer(uv + vec2(0.23, 0.0), 8.0, 0.42 + amount * 0.13, 0.095, 29.0);
+        float flakes = farSnow * 0.34 + midSnow * 0.68 + nearSnow;
+        return mix(scene, vec3(0.93, 0.98, 1.0), clamp(flakes * amount, 0.0, 0.94));
+      }
+
+      vec3 blurredScene(vec2 uv, float radius) {
+        if (u_hasMedia < 0.5) return sceneSample(uv);
+        vec2 px = radius / u_resolution;
+        vec3 result = vec3(0.0);
+        vec2 offsets[5] = vec2[5](
+          vec2(0.0, 0.0),
+          vec2(-1.0, -1.0), vec2(1.0, -1.0),
+          vec2(-1.0,  1.0), vec2(1.0,  1.0)
+        );
+        for (int i = 0; i < 5; i++) {
+          vec2 sampleUv = uv + offsets[i] * px;
+          vec3 sampleColor = sceneSample(sampleUv);
+          float weight = i == 0 ? 0.36 : 0.16;
+          result += sampleColor * weight;
+        }
+        return result;
+      }
+
+      float frostMask(vec2 uv) {
+        float edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+        float edge = 1.0 - smoothstep(0.015, 0.22, edgeDistance);
+        float crystal = fbm(uv * vec2(12.0, 18.0) + vec2(2.0, -u_time * 0.008));
+        float veins = abs(sin((uv.x * 1.7 + uv.y) * 34.0 + crystal * 7.0));
+        return smoothstep(0.62, 0.92, edge * 0.62 + crystal * 0.50 + veins * edge * 0.12);
+      }
+
+      vec3 glassReflection(vec2 uv, vec2 normal, float strength) {
+        vec2 reflectedUv = uv + normal * 0.09;
+        float broadBand = exp(-pow((reflectedUv.x + reflectedUv.y * 0.16 - 0.18) / 0.13, 2.0));
+        float thinBand = exp(-pow((reflectedUv.x + reflectedUv.y * 0.10 - 0.71) / 0.027, 2.0));
+        float upperGlow = pow(clamp(1.0 - uv.y, 0.0, 1.0), 4.0) * 0.18;
+        float edge = pow(1.0 - clamp(4.0 * uv.x * (1.0 - uv.x) * 4.0 * uv.y * (1.0 - uv.y), 0.0, 1.0), 2.0);
+        vec3 cool = mix(vec3(0.36, 0.48, 0.52), vec3(0.68, 0.78, 0.80), u_mode);
+        return cool * (broadBand * 0.12 + thinBand * 0.22 + upperGlow + edge * 0.06) * strength;
+      }
+
+      void main() {
+        vec2 uv = v_uv;
+        float rainMode = 1.0 - smoothstep(0.08, 0.92, u_mode);
+        float snowMode = smoothstep(0.08, 0.92, u_mode);
+        float rain = 0.0;
+        vec2 normal = vec2(0.0);
+        if (rainMode > 0.01) {
+          rain = rainHeight(uv);
+          normal = vec2(dFdx(rain), dFdy(rain));
+        }
+
+        vec2 lensNormal = normal * (1.35 + u_refraction * 0.48);
+        vec2 rainOffset = lensNormal * (0.014 + 0.019 * u_refraction) * rainMode;
+        float snowWarpNoise = fbm(uv * 7.0 + u_time * 0.01) - 0.5;
+        vec2 snowOffset = vec2(snowWarpNoise, fbm(uv.yx * 8.0) - 0.5) * 0.0035 * u_refraction * snowMode;
+        vec2 sampleUv = uv + rainOffset + snowOffset;
+
+        vec3 sharp = sceneSample(sampleUv);
+        float blurRadius = mix(2.0, 9.0, u_fog) + snowMode * 2.5;
+        vec3 soft = blurredScene(sampleUv, blurRadius);
+
+        float clearDrop = rain * (0.72 + u_refraction * 0.12) * rainMode;
+        vec3 color = mix(soft, sharp, clamp(clearDrop + (1.0 - u_fog) * 0.48, 0.0, 1.0));
+        if (snowMode > 0.01) {
+          vec3 snowScene = addSnow(color, sampleUv);
+          color = mix(color, snowScene, snowMode * (1.0 - u_fog * 0.22));
+        }
+
+        float condensation = fbm(uv * vec2(9.0, 13.0) + vec2(0.0, u_time * 0.008));
+        color = mix(color, vec3(0.62, 0.72, 0.74), condensation * u_fog * 0.12);
+
+        float slope = clamp(length(lensNormal) * 2.8, 0.0, 1.0);
+        float rim = smoothstep(0.08, 0.7, slope) * rain * rainMode;
+        vec3 surface = normalize(vec3(lensNormal * 5.4, 1.0));
+        float highlight = pow(clamp(dot(surface, normalize(vec3(-0.46, 0.72, 0.88))), 0.0, 1.0), 18.0);
+        float underside = clamp(lensNormal.y * 1.7, 0.0, 1.0) * rain * rainMode;
+        color += vec3(0.72, 0.86, 0.89) * (rim * 0.16 + highlight * rain * 0.38);
+        color -= vec3(0.035, 0.052, 0.057) * underside;
+
+        float frost = frostMask(uv) * snowMode;
+        vec3 frostColor = vec3(0.76, 0.85, 0.86) + vec3(0.08) * valueNoise(uv * 80.0);
+        color = mix(color, frostColor, frost * (0.28 + u_fog * 0.38));
+
+        color += glassReflection(uv, normal, u_reflection);
+        float vignette = 1.0 - 0.28 * smoothstep(0.24, 0.82, length((uv - 0.5) * vec2(0.82, 1.0)));
+        color *= vignette;
+        color = pow(max(color, 0.0), vec3(0.93));
+        outColor = vec4(color, 1.0);
+      }
+    `;
+
+    function compileShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const message = gl.getShaderInfoLog(shader);
+        gl.deleteShader(shader);
+        showError(`Shader 编译失败：${message}`);
+        throw new Error(message);
+      }
+      return shader;
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, compileShader(gl.VERTEX_SHADER, vertexSource));
+    gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentSource));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const message = gl.getProgramInfoLog(program);
+      showError(`Shader 链接失败：${message}`);
+      throw new Error(message);
+    }
+    gl.useProgram(program);
+
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    const positionLocation = gl.getAttribLocation(program, 'a_position');
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    const uniformNames = ['resolution', 'time', 'mode', 'intensity', 'fog', 'refraction', 'reflection', 'wind', 'motion', 'hasMedia', 'mediaAspect', 'media'];
+    const uniforms = Object.fromEntries(uniformNames.map(name => [name, gl.getUniformLocation(program, `u_${name}`)]));
+    const params = { intensity: 1.05, fog: 0.46, refraction: 1.08, reflection: 0.72, wind: 0.32, motion: 0.82 };
+    const urlParams = new URLSearchParams(location.search);
+    const requestedTime = Number(urlParams.get('time'));
+    const timeOffset = Number.isFinite(requestedTime) ? Math.max(0, Math.min(requestedTime, 3600)) : 0;
+    const qualityPresets = {
+      smooth: { scale: 0.52, fps: 24 },
+      balanced: { scale: 0.72, fps: 30 },
+      detail: { scale: 0.92, fps: 45 },
+    };
+    let quality = qualityPresets.smooth;
+    let modeTarget = 0;
+    let modeMix = 0;
+    let activeMedia = null;
+    let mediaUrl = null;
+    let mediaAspect = 1;
+
+    const mediaTexture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, mediaTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([24, 38, 44, 255]));
+    gl.uniform1i(uniforms.media, 0);
+
+    function resize() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.25) * quality.scale;
+      const width = Math.max(1, Math.round(innerWidth * dpr));
+      const height = Math.max(1, Math.round(innerHeight * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        gl.viewport(0, 0, width, height);
+      }
+    }
+
+    function updateTexture() {
+      if (!activeMedia) return;
+      gl.bindTexture(gl.TEXTURE_2D, mediaTexture);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, activeMedia);
+    }
+
+    let lastFrameTime = 0;
+    function render(timestamp) {
+      requestAnimationFrame(render);
+      if (document.hidden || timestamp - lastFrameTime < 1000 / quality.fps) return;
+      lastFrameTime = timestamp;
+      resize();
+      if (activeMedia instanceof HTMLVideoElement && activeMedia.readyState >= 2) updateTexture();
+      modeMix += (modeTarget - modeMix) * 0.035;
+      gl.useProgram(program);
+      gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
+      gl.uniform1f(uniforms.time, timestamp * 0.001 + timeOffset);
+      gl.uniform1f(uniforms.mode, modeMix);
+      gl.uniform1f(uniforms.intensity, params.intensity);
+      gl.uniform1f(uniforms.fog, params.fog);
+      gl.uniform1f(uniforms.refraction, params.refraction);
+      gl.uniform1f(uniforms.reflection, params.reflection);
+      gl.uniform1f(uniforms.wind, params.wind);
+      gl.uniform1f(uniforms.motion, params.motion);
+      gl.uniform1f(uniforms.hasMedia, activeMedia ? 1 : 0);
+      gl.uniform1f(uniforms.mediaAspect, mediaAspect);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    function setMode(mode, immediate = false) {
+      const snow = mode === 'snow';
+      modeTarget = snow ? 1 : 0;
+      if (immediate) modeMix = modeTarget;
+      document.body.dataset.mode = mode;
+      document.querySelectorAll('[data-mode]').forEach(button => button.classList.toggle('active', button.dataset.mode === mode));
+      document.getElementById('scene-title').textContent = snow ? '雪落在窗外' : '雨落在玻璃上';
+      document.getElementById('scene-subtitle').textContent = snow
+        ? '程序化分层雪场 · 结霜、雾面与玻璃反光'
+        : '原创 WebGL2 高度场 · 实时折射与反光';
+    }
+
+    document.querySelectorAll('[data-mode]').forEach(button => {
+      button.addEventListener('click', () => setMode(button.dataset.mode));
+    });
+
+    document.querySelectorAll('[data-uniform]').forEach(input => {
+      const key = input.dataset.uniform;
+      const value = document.querySelector(`[data-value="${key}"]`);
+      const update = () => {
+        params[key] = Number(input.value);
+        value.textContent = key === 'wind' ? params[key].toFixed(2) : `${Math.round(params[key] * 100)}%`;
+      };
+      input.addEventListener('input', update);
+      update();
+    });
+
+    document.getElementById('quality').addEventListener('change', event => {
+      quality = qualityPresets[event.target.value] || qualityPresets.smooth;
+      canvas.width = 1;
+      canvas.height = 1;
+      lastFrameTime = 0;
+    });
+
+    const panel = document.getElementById('panel');
+    const panelToggle = document.getElementById('panel-toggle');
+    panelToggle.addEventListener('click', () => {
+      const open = panel.classList.toggle('open');
+      panelToggle.setAttribute('aria-expanded', String(open));
+      panelToggle.setAttribute('aria-label', open ? '关闭效果设置' : '打开效果设置');
+    });
+
+    function clearMedia() {
+      if (activeMedia instanceof HTMLVideoElement) {
+        activeMedia.pause();
+        activeMedia.removeAttribute('src');
+        activeMedia.load();
+      }
+      if (mediaUrl) URL.revokeObjectURL(mediaUrl);
+      activeMedia = null;
+      mediaUrl = null;
+      mediaAspect = 1;
+      document.getElementById('media-name').textContent = '程序化双色流体';
+      document.getElementById('media-input').value = '';
+    }
+
+    function loadMedia(file) {
+      if (!file || (!file.type.startsWith('image/') && !file.type.startsWith('video/'))) return;
+      clearMedia();
+      mediaUrl = URL.createObjectURL(file);
+      document.getElementById('media-name').textContent = file.name;
+      if (file.type.startsWith('video/')) {
+        const video = document.createElement('video');
+        video.src = mediaUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.addEventListener('loadedmetadata', () => {
+          mediaAspect = video.videoWidth / Math.max(video.videoHeight, 1);
+          activeMedia = video;
+          video.play().catch(() => {});
+        }, { once: true });
+      } else {
+        const image = new Image();
+        image.addEventListener('load', () => {
+          mediaAspect = image.naturalWidth / Math.max(image.naturalHeight, 1);
+          activeMedia = image;
+          updateTexture();
+        }, { once: true });
+        image.src = mediaUrl;
+      }
+    }
+
+    document.getElementById('media-input').addEventListener('change', event => loadMedia(event.target.files[0]));
+    document.getElementById('reset-media').addEventListener('click', clearMedia);
+    window.addEventListener('dragover', event => { event.preventDefault(); document.body.classList.add('drop-active'); });
+    window.addEventListener('dragleave', event => { if (!event.relatedTarget) document.body.classList.remove('drop-active'); });
+    window.addEventListener('drop', event => {
+      event.preventDefault();
+      document.body.classList.remove('drop-active');
+      loadMedia(event.dataTransfer.files[0]);
+    });
+    window.addEventListener('resize', resize);
+
+    const requestedMode = urlParams.get('mode');
+    setMode(requestedMode === 'snow' ? 'snow' : 'rain', true);
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>

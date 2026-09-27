@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync Xiaomi health records for QuickModel
+After=quickmodel-health.service
+
+[Service]
+Type=oneshot
+User=qmmobile
+ExecStart=/opt/quickmodel-mobile-venv/bin/python /opt/quickmodel-mobile/mobile_server/sync_health.py
+TimeoutStartSec=10min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true

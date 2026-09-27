@@ -94,7 +94,8 @@ class Agent:
         self.mcp_manager = mcp_manager
         # Per-model context config (0 = use defaults)
         self.context_length = context_length or (1_000_000 if model in V4_MODELS else 1_000_000)
-        self.compact_threshold = compact_threshold or AUTO_COMPACT_THRESHOLD
+        self.compact_threshold = min(compact_threshold or AUTO_COMPACT_THRESHOLD,
+                                     max(1, int(self.context_length * 0.6)))
         self.search_enabled = search_enabled
         self._model_configs: list = []
         self._adapter = create_model_adapter(self.model_config)
@@ -434,6 +435,8 @@ class Agent:
                 )
                 if cb.on_context_update:
                     cb.on_context_update(estimate_tokens([m for m in compacted if m.get("role") != "system"]), self.compact_threshold)
+                if compacted is not all_messages:
+                    self.provider_state = {}
                 cb.on_done(compacted[1:])
                 return
             if messages and messages[-1].get("images") and cb.on_notice:
@@ -455,7 +458,21 @@ class Agent:
             while not self._stop_flag.is_set() and round_count < self.max_rounds:
                 all_messages = self._inject_context(all_messages)
                 all_messages = self._manage_context(all_messages, threshold, cb)
+                if self._stop_flag.is_set():
+                    break
+                # Never continue with an oversized history after failed/partial
+                # compaction. on_error persists the unchanged history for retry.
+                if estimate_tokens(all_messages) > threshold:
+                    raise RuntimeError(
+                        "上下文压缩后仍超过安全阈值，已暂停生成，未发送超长请求。"
+                        "完整历史已保留；请检查摘要模型配置后使用 /compact 重试。"
+                    )
                 full_messages = self._prepare_messages(all_messages)
+                request_tokens = estimate_tokens(full_messages) + estimate_tokens([
+                    {"role": "system", "content": json.dumps(self._all_tools(), ensure_ascii=False)}
+                ])
+                if request_tokens > int(self.context_length * 0.8):
+                    raise RuntimeError("请求（含系统提示与工具定义）超过模型安全窗口，已保留历史并暂停生成。请减少工具或使用 /compact。")
 
                 result = self._stream_and_parse(full_messages, cb, session_usage)
                 round_count += 1
@@ -530,7 +547,7 @@ class Agent:
                 if state == "started":
                     cb.on_notice("上下文已达到自动压缩阈值，正在压缩，请稍候…")
                 elif state == "completed":
-                    cb.on_notice(f"上下文自动压缩完成：{detail}。正在继续生成。")
+                    cb.on_notice(f"上下文自动压缩完成：{detail}。")
                 elif state in ("fallback", "progress"):
                     cb.on_notice(detail)
                 elif state == "failed":
@@ -546,6 +563,11 @@ class Agent:
                 stop_event=self._stop_flag,
                 on_status=on_compact_status,
             )
+            if compacted is not all_messages:
+                # Compaction invalidates server-side Responses continuation.
+                self.provider_state = {}
+                if estimate_tokens(compacted) <= threshold:
+                    self._auto_compact_attempted = False
             all_messages = compacted
         if cb.on_context_update:
             cb.on_context_update(estimate_tokens([m for m in all_messages if m.get("role") != "system"]), threshold)
@@ -700,6 +722,7 @@ class Agent:
                 )
                 state = compact_status.get("state")
                 if state == "completed":
+                    self.provider_state = {}
                     all_messages.clear()
                     all_messages.extend(compact_result)
                     result = f"上下文已压缩：{compact_status.get('detail', '')}"

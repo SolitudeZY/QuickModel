@@ -67,3 +67,12 @@ __pycache__/
 app/static/_index.runtime.html
 
 nul
+
+# Android generated files and personal signing keys
+android/.gradle/
+android/.kotlin/
+android/local.properties
+*.jks
+*.keystore
+!tests/test_mobile_server.py
+!tests/mobile_frontend.cjs

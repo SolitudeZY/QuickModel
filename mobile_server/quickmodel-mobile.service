@@ -1,0 +1,24 @@
+[Unit]
+Description=QuickModel mobile API
+After=network-online.target quickmodel-health.service
+
+[Service]
+User=qmmobile
+Group=qmmobile
+WorkingDirectory=/opt/quickmodel-mobile
+Environment=HOME=/var/lib/quickmodel-mobile
+Environment=QM_MOBILE_DATA=/var/lib/quickmodel-mobile
+Environment=QM_MOBILE_KEY_FILE=/etc/quickmodel-mobile/vault.key
+ExecStart=/opt/quickmodel-mobile-venv/bin/python -m uvicorn mobile_server.server:app --host 127.0.0.1 --port 18324 --no-access-log
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/quickmodel-mobile
+MemoryMax=450M
+
+[Install]
+WantedBy=multi-user.target

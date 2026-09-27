@@ -901,6 +901,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         total = 600000
         if active_mc:
             total = active_mc.get("compact_threshold", 0) or _lazy_agent().AUTO_COMPACT_THRESHOLD
+            context_length = active_mc.get("context_length", 0) or 1_000_000
+            total = min(total, max(1, int(context_length * 0.6)))
         return {"used": used, "total": total}
 
     # ── File helpers ──────────────────────────────────────────────

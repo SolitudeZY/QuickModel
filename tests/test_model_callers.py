@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import time
+import threading
 from tempfile import TemporaryDirectory
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ class ModelCallerTests(unittest.TestCase):
             result = advanced_tools._summarize_text(MODEL_CONFIG, "source")
         self.assertEqual(result, "summary")
         self.assertEqual(complete.call_args.args[0], MODEL_CONFIG)
+        self.assertEqual(complete.call_args.kwargs["max_tokens"], 2048)
 
     def test_summarizer_has_hard_timeout(self):
         def slow_complete(*args, **kwargs):
@@ -279,7 +281,7 @@ class CompactionTests(unittest.TestCase):
         self.assertIsNot(result, self.messages)
 
     def test_multichunk_default_budget_and_explicit_deadline(self):
-        for timeout, should_complete in ((None, True), (120, False)):
+        for timeout, should_complete in ((None, False), (120, False), (600, True)):
             clock = [0.0]
             statuses = []
 
@@ -297,6 +299,38 @@ class CompactionTests(unittest.TestCase):
             self.assertEqual(result is not self.messages, should_complete)
             self.assertIn("progress", statuses)
             self.assertEqual(statuses[-1], "completed" if should_complete else "failed")
+
+    def test_chunks_run_concurrently_and_merge_in_original_order(self):
+        barrier = threading.Barrier(3)
+        chunks = []
+        lock = threading.Lock()
+
+        def summarize(config, text, **kwargs):
+            if text.startswith("以下是同一段对话"):
+                self.assertIn("[片段1]\nfirst", text)
+                self.assertIn("[片段2]\nsecond", text)
+                self.assertIn("[片段3]\nthird", text)
+                return "merged"
+            with lock:
+                chunks.append(text)
+            barrier.wait(timeout=2)
+            if text.startswith('[{"role"'):
+                time.sleep(0.03)
+                return "first"
+            return "third" if len(text) < 60000 else "second"
+
+        with patch("app.advanced_tools._summarize_text", side_effect=summarize):
+            result = auto_compact(self.messages, {})
+        self.assertIsNot(result, self.messages)
+        self.assertEqual(len(chunks), 3)
+
+    def test_cancelled_compaction_preserves_history(self):
+        stop = threading.Event()
+        stop.set()
+        with patch("app.advanced_tools._summarize_text") as summarize:
+            result = auto_compact(self.messages, {}, stop_event=stop)
+        self.assertIs(result, self.messages)
+        summarize.assert_not_called()
 
     def test_summary_that_increases_context_is_not_applied(self):
         statuses = []

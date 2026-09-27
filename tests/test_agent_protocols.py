@@ -192,6 +192,44 @@ class AgentProtocolTests(unittest.TestCase):
 
         compact.assert_called_once()
 
+    def test_failed_compaction_blocks_model_request_and_preserves_history(self):
+        agent = object.__new__(Agent)
+        agent.model_config = model_config("openai_chat")
+        agent._model_configs = []
+        agent._stop_flag = threading.Event()
+        agent._subagent_results = {}
+        agent.system_prompt = "system"
+        agent.compact_threshold = 10
+        agent.context_length = 1000
+        agent.max_rounds = 2
+        done, errors = [], []
+        messages = [{"role": "user", "content": "x" * 1000}]
+        with patch("app.agent.auto_compact", side_effect=lambda msgs, *a, **kw: msgs), \
+                patch.object(agent, "_inject_context", side_effect=lambda msgs: msgs), \
+                patch.object(agent, "_stream_and_parse") as stream:
+            agent.run(messages, lambda *_: None, lambda *_: None,
+                      lambda *_: None, lambda *_: True, done.append,
+                      lambda *args: errors.append(args))
+        stream.assert_not_called()
+        self.assertEqual(done, [])
+        self.assertEqual(errors[0][1], messages)
+        self.assertIn("未发送超长请求", errors[0][0])
+
+    def test_successful_compaction_rearms_and_clears_server_state(self):
+        agent = object.__new__(Agent)
+        agent.model_config = model_config("openai_chat")
+        agent._model_configs = []
+        agent._stop_flag = threading.Event()
+        agent._auto_compact_attempted = False
+        agent.provider_state = {"response_id": "old"}
+        callback = SimpleNamespace(on_notice=None, on_context_update=None)
+        messages = [{"role": "user", "content": "x" * 1000}]
+        with patch("app.agent.auto_compact", side_effect=lambda *a, **kw: [{"role": "user", "content": "short"}]) as compact:
+            agent._manage_context(messages, 100, callback)
+            agent._manage_context(messages, 100, callback)
+        self.assertEqual(compact.call_count, 2)
+        self.assertEqual(agent.provider_state, {})
+
 
 if __name__ == "__main__":
     unittest.main()
