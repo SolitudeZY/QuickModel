@@ -2,6 +2,46 @@
 import base64
 from urllib.parse import urlsplit
 import httpx
+import json
+import uuid
+from websockets.sync.client import connect
+
+
+def stream_pcm(text, config):
+    """Yield protocol-safe NDJSON as audio arrives. Closing the iterator closes WS."""
+    if not text or len(text) > 220:
+        raise ValueError('Invalid speech segment')
+    url = config.get('tts_realtime_url',
+        'wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3-tts-flash-realtime')
+    if not url.startswith('wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model='):
+        raise ValueError('Untrusted realtime speech endpoint')
+    received = 0
+    with connect(url, additional_headers={'Authorization': 'Bearer ' + config['api_key']},
+                 open_timeout=12, close_timeout=2) as ws:
+        def send(kind, **fields):
+            ws.send(json.dumps({'event_id': uuid.uuid4().hex, 'type': kind, **fields}))
+        send('session.update', session={'voice': config.get('voice', 'Cherry'), 'mode': 'server_commit',
+             'language_type': 'Chinese', 'response_format': 'pcm', 'sample_rate': 24000})
+        send('input_text_buffer.append', text=text)
+        send('input_text_buffer.commit')
+        send('session.finish')
+        for _ in range(2000):
+            event = json.loads(ws.recv(timeout=30))
+            kind = event.get('type')
+            if kind == 'response.audio.delta':
+                chunk = event.get('delta', '')
+                if not isinstance(chunk, str) or len(chunk) > 100000:
+                    raise ValueError('Invalid speech chunk')
+                received += len(chunk)
+                if received > 2800000:
+                    raise ValueError('Speech segment too large')
+                yield json.dumps({'audio': chunk}, separators=(',', ':')) + '\n'
+            elif kind == 'error':
+                raise ValueError('Speech provider returned an error')
+            elif kind == 'session.finished':
+                yield '{"done":true}\n'
+                return
+        raise TimeoutError('Speech stream did not finish')
 
 
 def transcribe(data, config):

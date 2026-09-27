@@ -51,6 +51,7 @@ function renderConversation(forceScroll=false){
   $('model').disabled=!!state.pending||!!state.run;
   $('send').disabled=readonly||state.sending||!!state.run||state.uploading;
   for(const id of ['attach-image','attach-video','capture-screen'])$(id).disabled=readonly||!!state.pending||!!state.run||state.uploading;
+  $('voice-open').disabled=!!state.pending||!!state.run||state.uploading;
   $('send').textContent=state.pending?'重试发送':'发送';
   $('stop').hidden=!state.run;
   $('chat-note').textContent=readonly?'桌面历史 · 只读，请新建对话继续':'会话自动保存在你的服务器';
@@ -80,7 +81,8 @@ async function send(){
     if(!state.conv)state.conv=await api('/conversations','POST',{model:$('model').value});
     if(!state.pending){state.pending={cid:state.conv.id,body:{request_id:crypto.randomUUID(),text,model:$('model').value,revision:state.conv.revision,attachments:state.attachments.map(x=>x.id)}};await persistPending();}
     const r=await api('/conversations/'+state.pending.cid+'/send','POST',state.pending.body);
-    state.run={id:r.run_id,cid:state.pending.cid};state.pending=null;await persistPending();$('draft').value='';state.attachments=[];state.videoDescription=null;renderAttachments();
+    state.run={id:r.run_id,cid:state.pending.cid};if(window.qmVoiceRunStarted)window.qmVoiceRunStarted(state.run.id);
+    state.pending=null;await persistPending();$('draft').value='';state.attachments=[];state.videoDescription=null;renderAttachments();
     state.conv=await api('/conversations/'+state.run.cid);renderConversation(true);poll();
   }catch(e){notice(e.message);if(e.message.startsWith('409')||e.message.startsWith('413')||e.message.startsWith('400')){state.pending=null;await persistPending();if(state.conv)state.conv=await api('/conversations/'+state.conv.id);}}
   finally{state.sending=false;renderConversation();}
@@ -90,16 +92,19 @@ async function poll(){
   try{
     const r=await api('/runs/'+state.run.id);
     if(r.status!=='running'){
-      const cid=state.run.cid;state.run=null;await persistPending();state.conv=await api('/conversations/'+cid);renderConversation();await refreshList();
-      if(r.error)notice(r.error);else if(r.status==='stopped')notice('已停止生成');else if(window.qmSpeakReply)window.qmSpeakReply(state.conv.messages.at(-1)?.content||'');
+      const cid=state.run.cid;if(window.qmVoiceProgress)window.qmVoiceProgress(r.text||'',true);
+      if(window.qmVoiceRunDone)window.qmVoiceRunDone(r);
+      state.run=null;await persistPending();state.conv=await api('/conversations/'+cid);renderConversation();await refreshList();
+      if(r.error)notice(r.error);else if(r.status==='stopped')notice('已停止生成');
     }else{
       const box=$('messages'),near=box.scrollHeight-box.scrollTop-box.clientHeight<100;
       let el=$('stream');const replacement=bubble({role:'assistant',content:r.text||'正在思考…',reasoning_content:r.reasoning});replacement.id='stream';
       if(el)el.replaceWith(replacement);else box.append(replacement);
+      if(window.qmVoiceProgress)window.qmVoiceProgress(r.text||'',false);
       if(near)box.scrollTop=box.scrollHeight;
     }
   }catch(e){notice(e.message+' 回复仍保留在服务器，将自动重连。');}
-  finally{state.polling=false;if(state.run)setTimeout(poll,1500);}
+  finally{state.polling=false;if(state.run)setTimeout(poll,window.qmVoiceActive?.()?450:1500);}
 }
 function tab(name){state.tab=name;for(const n of ['chat','health','settings'])$(n).hidden=n!==name;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('selected',b.dataset.tab===name));updateHeading();if(name==='health')loadHealth().catch(e=>notice(e.message));}
 function metric(title,value,unit,caption=''){return '<article><h3>'+escapeHtml(title)+'</h3><div class="metric">'+escapeHtml(value)+'<span class="unit">'+escapeHtml(unit)+'</span></div><small>'+escapeHtml(caption)+'</small></article>';}

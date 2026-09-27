@@ -220,4 +220,17 @@ class MobileTests(unittest.TestCase):
             client.post.return_value.json.return_value={'output':{'audio':{'url':'http://127.0.0.1/private'}}}
             with self.assertRaises(ValueError):s.speech.synthesize('test',{'api_key':'secret','tts_url':'https://example.test'})
 
+    def test_realtime_speech_requires_auth_and_streams_pcm_before_done(self):
+        self.mock_config.return_value['speech']={'api_key':'never-export'}
+        self.client.headers.clear()
+        self.assertEqual(self.client.post('/voice/tts-stream',json={'text':'测试'}).status_code,401)
+        self.client.headers['Authorization']='Bearer '+self.token
+        with patch.object(s.speech,'stream_pcm',return_value=iter(['{"audio":"AAEC"}\n','{"done":true}\n'])) as stream:
+            response=self.client.post('/voice/tts-stream',json={'text':'测试'})
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.text.splitlines(),['{"audio":"AAEC"}','{"done":true}'])
+            self.assertEqual(stream.call_args.args[0],'测试')
+            self.assertNotIn('never-export',response.text)
+        self.assertEqual(self.client.post('/voice/tts-stream',json={'text':'x'*221}).status_code,422)
+
 if __name__=='__main__':unittest.main()

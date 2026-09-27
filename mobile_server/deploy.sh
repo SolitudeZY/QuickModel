@@ -5,7 +5,7 @@ install -d -o qmmobile -g qmmobile -m 700 /var/lib/quickmodel-mobile /etc/quickm
 if [ ! -d /opt/quickmodel-mobile-venv ]; then python3 -m venv /opt/quickmodel-mobile-venv; fi
 python3 - <<'PY'
 from pathlib import Path
-names = ('openai', 'anthropic', 'fastapi', 'uvicorn', 'cryptography', 'httpx', 'Pillow')
+names = ('openai', 'anthropic', 'fastapi', 'uvicorn', 'cryptography', 'httpx', 'Pillow', 'websockets')
 lines = Path('/opt/quickmodel-mobile/requirements.txt').read_text().splitlines()
 Path('/opt/quickmodel-mobile/server-requirements.txt').write_text('\n'.join(x for x in lines if any(x.startswith(n+'>') for n in names)))
 PY

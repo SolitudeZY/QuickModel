@@ -1,5 +1,14 @@
 # Android 0.1.0 个人试用版
 
+## 0.4.0 语音通话（2026-09-28）
+
+- 聊天页的“语音通话”按钮打开独立通话界面；文字记录可展开，沿用当前服务器会话、模型、健康上下文与附件。
+- 模型产生完整句段后，服务器调用百炼实时语音合成并逐包转发 24 kHz PCM；Android 用 AudioTrack 边接收边播放，句段按序排队。打断立即停止当前播放并清空旧句段。服务端 `/voice/tts-stream` 需设备鉴权，厂商密钥仍只在服务器。
+- 前台通话使用 AudioRecord 和 Android 回声消除检测说话；说话会停止 AI 声音、取消当前生成，静音后自动识别并开启下一轮。也可轻点“立即说话”手动打断。退出或切后台释放麦克风；首次使用按需授权。实际回声消除与自动打断阈值需在小米 14 真机调校。
+- 保留原 `/voice/asr` 与 `/voice/tts`，0.3 客户端可继续使用。覆盖安装 `QuickModel-0.4.0.apk`，versionCode 4，同签名，设备配对凭据保留。
+
+设计与验收范围见 [`docs/mobile-voice-call-0.4-plan.md`](../docs/mobile-voice-call-0.4-plan.md)。
+
 ## 0.2.0 更新（2026-09-27）
 
 - 原生 FrameLayout 统一处理状态栏、挖孔、导航栏和 IME；不再把 padding 直接加给 WebView。Android 11+ 使用 WindowInsetsAnimation 按帧调整安全区域，并消费已处理的 insets，避免网页重复避让。网页使用真实可用视口高度，键盘出现时隐藏底部导航。

@@ -33,7 +33,7 @@ import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
-    private val pool = Executors.newFixedThreadPool(3)
+    private val pool = Executors.newFixedThreadPool(4)
     private val origin = "https://appassets.androidplatform.net"
     private val server = "https://47.102.146.139/quickmodel-api"
     private val prefs by lazy { getSharedPreferences("device", MODE_PRIVATE) }
@@ -141,6 +141,32 @@ class MainActivity : Activity() {
             return Pair(status, response)
         } finally { connection.disconnect() }
     }
+    private fun streamAudio(path: String, text: String, onChunk: (ByteArray) -> Boolean) {
+        val connection = URL(server + path).openConnection() as HttpsURLConnection
+        voice.attach(connection)
+        try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 12000
+            connection.readTimeout = 30000
+            connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Authorization", "Bearer " + token())
+            connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "application/x-ndjson")
+            connection.doOutput = true
+            connection.outputStream.use { it.write(JSONObject().put("text", text).toString().toByteArray(Charsets.UTF_8)) }
+            if (connection.responseCode != 200) throw IllegalStateException("语音流不可用")
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { lines ->
+                while (true) {
+                    val line = lines.readLine() ?: break
+                    if (line.length > 100000) throw IllegalStateException("语音片段过大")
+                    val event = JSONObject(line)
+                    if (event.has("error")) throw IllegalStateException("语音服务暂不可用")
+                    if (event.optBoolean("done")) break
+                    if (event.has("audio") && !onChunk(Base64.decode(event.getString("audio"), Base64.DEFAULT))) break
+                }
+            }
+        } finally { voice.attach(null); connection.disconnect() }
+    }
     private fun dispatch(input: JSONObject): JSONObject {
         val method = input.optString("method", "GET")
         val path = input.optString("path")
@@ -156,13 +182,16 @@ class MainActivity : Activity() {
             return JSONObject().put("started", true)
         }
         if (path.startsWith("/native/voice-")) {
-            val text = input.optJSONObject("body")?.optString("text") ?: ""
+            val body = input.optJSONObject("body") ?: JSONObject()
             runOnUiThread {
                 when (path) {
-                    "/native/voice-start" -> voice.start()
-                    "/native/voice-stop" -> voice.stop(true)
-                    "/native/voice-cancel" -> voice.pause()
-                    "/native/voice-speak" -> voice.speak(text)
+                    "/native/voice-call-start" -> voice.startCall()
+                    "/native/voice-call-end" -> voice.endCall()
+                    "/native/voice-turn" -> voice.setTurn(body.optString("id"))
+                    "/native/voice-turn-done" -> voice.turnFinished(body.optString("id"))
+                    "/native/voice-say" -> voice.say(body.optString("id"), body.optString("text"))
+                    "/native/voice-interrupt" -> voice.interrupt()
+                    "/native/voice-manual-stop" -> voice.stopManual()
                 }
             }
             return JSONObject().put("ok", true)
@@ -239,7 +268,8 @@ class MainActivity : Activity() {
         val root = FrameLayout(this)
         root.setBackgroundColor(Color.rgb(246, 245, 240))
         web = WebView(this)
-        voice = VoiceController(this, pool, ::request) { result ->
+        voice = VoiceController(this, pool, ::request,
+            { path, text, onChunk -> streamAudio(path, text, onChunk) }) { result ->
             if (!isDestroyed) web.evaluateJavascript("window.mobileVoice && window.mobileVoice(" + result.toString() + ")", null)
         }
         root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -326,6 +356,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         consumeScreenshot()
+        if (::web.isInitialized) web.evaluateJavascript("window.qmVoiceResume && window.qmVoiceResume()", null)
     }
     private fun consumeScreenshot() {
         if (!::web.isInitialized) return
@@ -348,5 +379,9 @@ class MainActivity : Activity() {
         }
     }
     override fun onPause() { if (::voice.isInitialized) voice.pause(); super.onPause() }
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 42 && ::voice.isInitialized) voice.onPermissionResult(grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED)
+    }
     override fun onDestroy() { voice.destroy(); web.destroy(); pool.shutdownNow(); super.onDestroy() }
 }

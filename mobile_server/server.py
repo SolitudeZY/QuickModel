@@ -19,7 +19,7 @@ from pathlib import Path
 import httpx
 from cryptography.fernet import Fernet
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.model_protocol import create_model_adapter
@@ -269,6 +269,24 @@ class ImageUpload(BaseModel):
 
 class SpeechText(BaseModel):
     text: str = Field(min_length=1, max_length=600)
+
+
+class SpeechSegment(BaseModel):
+    text: str = Field(min_length=1, max_length=220)
+
+
+@app.post('/voice/tts-stream')
+def stream_voice(body: SpeechSegment, device=Depends(auth)):
+    cfg = models_config().get('speech', {})
+    if not cfg.get('api_key'):
+        raise HTTPException(503, '服务器尚未配置语音服务')
+    def frames():
+        try:
+            yield from speech.stream_pcm(body.text, cfg)
+        except Exception as exc:
+            logging.warning('Speech stream failed: %s', type(exc).__name__)
+            yield '{"error":"语音流中断，请重试"}\n'
+    return StreamingResponse(frames(), media_type='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
 
 
 @app.post('/voice/asr')

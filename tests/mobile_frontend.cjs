@@ -9,7 +9,7 @@ const root=path.resolve(__dirname,'../mobile_web');
  await page.addInitScript(()=>{
   let paired=false,pending='{}',conv={id:'conv_mobile_test',title:'新对话',revision:1,messages:[],source:'mobile'},polls=0;
   let settings={revision:0,active_model_config:'测试模型',models:[{name:'测试模型',model:'model-test',system_prompt:'test'}],preferences:{theme_mode:'night',font_size:15,starfield_enabled:true,starfield_mode:'weather',background_quality:'eco',weather_enabled:true,weather_location_mode:'ip',weather_city:'',weather_preview:'auto',weather_intensity:70,weather_mist:32,weather_refraction:65,weather_refresh_minutes:30,max_output_tokens:4096,thinking:'off',health_context_enabled:false}};
-  window.QuickModelNative={postMessage(text){const r=JSON.parse(text);let data;
+  window.nativeCalls=[];window.QuickModelNative={postMessage(text){const r=JSON.parse(text);window.nativeCalls.push(r);let data;
    if(r.path==='/native/status')data={paired};
    else if(r.path==='/native/pending'){if(r.method==='POST')pending=r.body.value;data={value:pending};}
    else if(r.path==='/pair'){paired=true;data={paired:true};}
@@ -55,14 +55,24 @@ const root=path.resolve(__dirname,'../mobile_web');
  await page.click('[data-tab=chat]');
  await page.evaluate(()=>window.mobileImage({id:'a'.repeat(64),preview:'data:image/png;base64,iVBORw0KGgo='}));
  assert.equal(await page.locator('.attachment-chip').count(),1);
- await page.fill('#draft','inspect image');await page.click('#send');await page.waitForFunction(()=>document.querySelector('#stop').hidden);
+ await page.fill('#draft','inspect image');await page.click('#send');await page.waitForFunction(()=>window.lastSend?.text==='inspect image');await page.waitForFunction(()=>document.querySelector('#stop').hidden);
  assert.deepEqual(await page.evaluate(()=>window.lastSend.attachments),['a'.repeat(64)]);
  await page.waitForFunction(()=>document.querySelectorAll('.attachment-preview').length===1);
- await page.evaluate(()=>window.mobileVoice({status:'recording'}));assert.equal(await page.locator('#voice-record').innerText(),'结束录音');
- await page.evaluate(()=>window.mobileVoice({status:'ready',text:'synthetic recognized speech'}));assert.equal(await page.inputValue('#draft'),'synthetic recognized speech');
+ await page.click('#voice-open');await page.locator('#voice-call').waitFor({state:'visible'});
+ assert.equal(await page.locator('#voice-mode').count(),0);
+ await page.evaluate(()=>window.mobileVoice({status:'listening'}));assert.match(await page.locator('#call-status').innerText(),/聆听/);
+ await page.evaluate(()=>{window.qmVoiceRunStarted('test-run');window.qmVoiceProgress('这是一句比较长的流式回复。接下来还会继续。',false);});
+ await page.waitForFunction(()=>window.nativeCalls.some(x=>x.path==='/native/voice-say'));
+ assert.equal(await page.evaluate(()=>window.nativeCalls.filter(x=>x.path==='/native/voice-say').length),1,'speech starts before model finishes');
+ await page.evaluate(()=>window.mobileVoice({status:'speaking'}));assert.match(await page.locator('#call-status').innerText(),/说话/);
+ await page.evaluate(()=>window.mobileVoice({status:'interrupt'}));assert.match(await page.locator('#call-status').innerText(),/听你说/);
+ await page.evaluate(()=>window.mobileVoice({status:'ready',text:'刚刚说到哪里？'}));await page.waitForFunction(()=>window.lastSend?.text==='刚刚说到哪里？');
+ assert.match(await page.locator('#call-lines').textContent(),/刚刚说到哪里/);
+ const callBox=await page.locator('#voice-call').boundingBox();assert(callBox&&callBox.y===0&&callBox.y+callBox.height===852,'call page fills safe app viewport');
+ if(process.env.QM_QA_SCREENSHOT_DIR){fs.mkdirSync(process.env.QM_QA_SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.QM_QA_SCREENSHOT_DIR,'mobile-call-040.png')});}
+ await page.click('#call-end');await page.locator('#voice-call').waitFor({state:'hidden'});
  await page.evaluate(()=>window.mobileImage({images:[{id:'b'.repeat(64),preview:'data:image/png;base64,iVBORw0KGgo='}],description:'video frame at 0.0 seconds'}));
  assert.match(await page.inputValue('#draft'),/0.0 seconds/);
- await page.evaluate(()=>window.mobileVoice({status:'ready',text:'what happened'}));assert.match(await page.inputValue('#draft'),/0.0 seconds/);
- assert.deepEqual(errors,[]);console.log('PASS pairing, chat, health, Markdown/math, XSS, keyboard viewport, preferences save/reload, desktop background');
+ assert.deepEqual(errors,[]);console.log('PASS mobile chat, keyboard, health, image, voice call, early speech, interruption, transcript');
  }finally{if(browser)await browser.close();server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
