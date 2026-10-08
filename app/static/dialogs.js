@@ -57,7 +57,7 @@ function _startCountdown() {
     if (_countdownSeconds <= 0) {
       _clearCountdown();
       $('confirm-overlay').classList.add('hidden');
-      window.pywebview.api.confirm_tool(true);
+      window.pywebview.api.confirm_tool(true, dialogConversationId);
     }
   }, 1000);
 }
@@ -65,17 +65,17 @@ function _startCountdown() {
 $('btn-confirm-yes').addEventListener('click', () => {
   _clearCountdown();
   $('confirm-overlay').classList.add('hidden');
-  window.pywebview.api.confirm_tool(true);
+  window.pywebview.api.confirm_tool(true, dialogConversationId);
 });
 $('btn-confirm-no').addEventListener('click', () => {
   _clearCountdown();
   $('confirm-overlay').classList.add('hidden');
-  window.pywebview.api.confirm_tool(false);
+  window.pywebview.api.confirm_tool(false, dialogConversationId);
 });
 $('btn-confirm-always').addEventListener('click', () => {
   _clearCountdown();
   $('confirm-overlay').classList.add('hidden');
-  window.pywebview.api.confirm_tool_always(_confirmCommand);
+  window.pywebview.api.confirm_tool_always(_confirmCommand, dialogConversationId);
 });
 $('btn-confirm-auto').addEventListener('click', () => {
   // Switch to auto_countdown mode and start countdown for current dialog
@@ -87,7 +87,7 @@ $('btn-confirm-auto').addEventListener('click', () => {
 $('btn-confirm-wildcard').addEventListener('click', () => {
   _clearCountdown();
   $('confirm-overlay').classList.add('hidden');
-  window.pywebview.api.confirm_tool_always(_confirmWildcard);
+  window.pywebview.api.confirm_tool_always(_confirmWildcard, dialogConversationId);
 });
 // Keyboard shortcuts: Enter = allow, Shift+Enter = always allow (wildcard if available, else exact)
 document.addEventListener('keydown', e => {
@@ -96,21 +96,21 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     _clearCountdown();
     $('confirm-overlay').classList.add('hidden');
-    window.pywebview.api.confirm_tool(true);
+    window.pywebview.api.confirm_tool(true, dialogConversationId);
   } else if (e.key === 'Enter' && e.shiftKey) {
     e.preventDefault();
     _clearCountdown();
     $('confirm-overlay').classList.add('hidden');
     if (_confirmWildcard && !$('btn-confirm-wildcard').classList.contains('hidden')) {
-      window.pywebview.api.confirm_tool_always(_confirmWildcard);
+      window.pywebview.api.confirm_tool_always(_confirmWildcard, dialogConversationId);
     } else {
-      window.pywebview.api.confirm_tool_always(_confirmCommand);
+      window.pywebview.api.confirm_tool_always(_confirmCommand, dialogConversationId);
     }
   } else if (e.key === 'Escape') {
     e.preventDefault();
     _clearCountdown();
     $('confirm-overlay').classList.add('hidden');
-    window.pywebview.api.confirm_tool(false);
+    window.pywebview.api.confirm_tool(false, dialogConversationId);
   }
 });
 
@@ -177,7 +177,7 @@ function _submitAskAnswer() {
   }
   if (!answer) answer = '(无回答)';
   $('ask-overlay').classList.add('hidden');
-  window.pywebview.api.answer_question(answer);
+  window.pywebview.api.answer_question(answer, dialogConversationId);
 }
 
 $('btn-ask-submit').addEventListener('click', _submitAskAnswer);
@@ -215,7 +215,7 @@ document.addEventListener('keydown', e => {
   } else if (e.key === 'Escape') {
     e.preventDefault();
     $('ask-overlay').classList.add('hidden');
-    window.pywebview.api.answer_question('(用户取消)');
+    window.pywebview.api.answer_question('(用户取消)', dialogConversationId);
   }
 });
 
@@ -234,7 +234,7 @@ function _submitSecret(value) {
   const answer = value !== undefined ? value : input.value;
   input.value = '';
   $('secret-overlay').classList.add('hidden');
-  window.pywebview.api.answer_secret(answer || '');
+  window.pywebview.api.answer_secret(answer || '', dialogConversationId);
 }
 
 $('btn-secret-submit').addEventListener('click', () => _submitSecret());
@@ -257,11 +257,11 @@ function showPlanApproval(summary) {
 }
 $('btn-plan-approve').addEventListener('click', () => {
   $('plan-overlay').classList.add('hidden');
-  window.pywebview.api.approve_plan(true);
+  window.pywebview.api.approve_plan(true, dialogConversationId);
 });
 $('btn-plan-reject').addEventListener('click', () => {
   $('plan-overlay').classList.add('hidden');
-  window.pywebview.api.approve_plan(false);
+  window.pywebview.api.approve_plan(false, dialogConversationId);
 });
 
 // ── Image lightbox ────────────────────────────────────────────────
@@ -289,7 +289,7 @@ async function openDiffModal(path, fname) {
   overlay.classList.remove('hidden');
   let res;
   try {
-    res = await window.pywebview.api.get_file_diff(path);
+    res = await window.pywebview.api.get_file_diff(path, state.currentConvId);
   } catch (e) {
     $('diff-body').innerHTML = `<div class="diff-empty">读取差异失败：${escapeHtml(String(e))}</div>`;
     return;

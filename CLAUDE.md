@@ -6,6 +6,8 @@
 
 ## Conversation Management Invariants
 
+- Persistent conversations can generate concurrently. `API._sessions` owns independent callback receivers, agents, cancellation/approval events and todo/task/background managers, with a lock reserving each conversation before dispatch. All generation callbacks carry their conversation ID through `Chat.forConversation`; stop and dialog replies target that ID.
+- `sessions.js` caches each conversation's unsent text, attachment objects/DOM, stream DOM and rendering state for the lifetime of the app window. Background callbacks queue in order and replay on return; completed/expired dialog requests are discarded. Temporary conversations retain their stop-before-discard behavior. Regression checks: `python -m unittest tests.test_parallel_conversations` and `node tests/frontend_sessions.cjs` (Playwright plus installed Edge).
 - Project archive matching uses a normalized path key and never requires the project directory to exist locally. Windows drive-letter case, slash direction, trailing separators, and whitespace are normalized before comparison.
 - Batch archive, restore, and delete APIs operate on conversation IDs. The actively generating conversation is rejected by batch operations and project archive operations.
 - Temporary conversations are stored only in `API._temporary_conversations`. They are excluded from disk persistence, sidebar listing, search, archive operations, and cloud sync. Starting or switching to a persistent conversation discards temporary state after generation has stopped.
@@ -63,7 +65,7 @@
 `app.js` 曾达 2681 行，已按功能拆分。**全部文件共享同一全局作用域**（非 ES module），靠 `index.html` 里的加载顺序保证可用：
 
 ```
-vendor/* → core.js → render.js → drag.js → dialogs.js → settings.js → starfield.js → app.js
+vendor/* → core.js → sessions.js → render.js → drag.js → dialogs.js → settings.js → starfield.js → app.js
 ```
 
 - `core.js`（~38 行）：`state`、`$`、DOM 引用（convList/chatMessages/msgInput/…）、`_convColors`/`_randomConvColor`。**必须最先加载**——其它文件顶层的 `$('btn-…').addEventListener` 在 load 时即执行，依赖 `$`/DOM 引用。

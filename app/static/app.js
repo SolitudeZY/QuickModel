@@ -407,6 +407,13 @@ function _makeConvLi(conv, idx) {
   const _c = _fmtConvTime(conv.created_at, true);
   const _u = _fmtConvTime(conv.updated_at, true);
   li.title = `创建：${_c || '未知'}\n更新：${_u || '未知'}`;
+  const activity = conversationViews.get(conv.id);
+  if (activity && (activity.running || activity.waiting)) {
+    const badge = document.createElement('span');
+    badge.className = 'conv-time';
+    badge.textContent = activity.waiting ? '等待确认' : '生成中…';
+    li.appendChild(badge);
+  }
 
   const actions = document.createElement('div');
   actions.className = 'conv-actions';
@@ -607,6 +614,7 @@ function _applyContentSearchResults(results, kw) {
 }
 
 async function openConversation(convId) {
+  const serial = ++conversationOpenSerial;
   if (state.temporaryConversation && state.currentConvId !== convId) {
     const discarded = await window.pywebview.api.discard_temporary_conversation(state.currentConvId);
     if (!discarded || !discarded.ok) {
@@ -615,9 +623,9 @@ async function openConversation(convId) {
     }
   }
   const conv = await window.pywebview.api.open_conversation(convId);
-  if (!conv) return;
+  if (!conv || serial !== conversationOpenSerial) return;
   hideHome();
-  state.currentConvId = convId;
+  const cachedView = switchConversationView(convId);
   setTemporaryMode(conv.temporary === true);
   convTitle.textContent = conv.title;
   const summary = state.conversations.find(item => item.id === convId);
@@ -633,9 +641,9 @@ async function openConversation(convId) {
   renderConvList(kw);
   // Re-apply content search results so the list doesn't disappear
   if (kw) _runContentSearch(kw);
-  loadHistory(conv.messages || []);
+  if (!cachedView) loadHistory(conv.messages || []);
   // 项目目录在本机不存在时提示（多为跨机器同步导致的绝对路径失效）
-  if (conv.project_path && conv.project_exists === false) {
+  if (!cachedView && conv.project_path && conv.project_exists === false) {
     const banner = document.createElement('div');
     banner.className = 'project-missing-banner';
     banner.innerHTML = `⚠ 该会话绑定的项目目录在本机不存在：<code>${escapeHtml(conv.project_path)}</code>`
@@ -644,15 +652,10 @@ async function openConversation(convId) {
     banner.querySelector('.btn-reset-project').addEventListener('click', () => resetConversationProject(convId));
     chatMessages.insertBefore(banner, chatMessages.firstChild);
   }
-  // If this conversation is currently streaming, re-attach all stream nodes
-  if (_streamingConvId === convId && _streamNodes.length > 0) {
-    _streamNodes.forEach(node => chatMessages.appendChild(node));
-    if (_typingEl) chatMessages.appendChild(_typingEl);
-    scrollToBottom();
-  }
   Chat.updateFileOps(conv.file_ops || []);
   // 刷新上下文用量
   const ctx = await window.pywebview.api.get_context_usage(convId);
+  if (state.currentConvId !== convId || serial !== conversationOpenSerial) return;
   updateContextBar(ctx.used, ctx.total);
   // Highlight and scroll to keyword match in chat
   if (kw) {
@@ -728,27 +731,30 @@ function _highlightAndScrollTo(keyword) {
 
 // 点击"+ 新对话"：先显示主页选择项目，而非直接建会话
 async function newConversation() {
-  if (state.running) {
-    alert('请先停止当前生成，再开始新对话。');
+  ++conversationOpenSerial;
+  if (state.temporaryConversation && state.running) {
+    alert('请先停止临时会话的生成。');
     return;
   }
   if (state.temporaryConversation && state.currentConvId) {
     await window.pywebview.api.discard_temporary_conversation(state.currentConvId);
-    state.currentConvId = null;
     convTitle.textContent = '';
   }
+  switchConversationView(null);
   setTemporaryMode(false);
   await showHome();
 }
 
 async function startTemporaryConversation() {
-  if (state.running) {
+  const serial = ++conversationOpenSerial;
+  if (state.temporaryConversation && state.running) {
     alert('请先停止当前生成，再开始临时对话。');
     return;
   }
   const conv = await window.pywebview.api.new_temporary_conversation();
+  if (serial !== conversationOpenSerial) return;
   state.showArchived = false;
-  state.currentConvId = conv.id;
+  switchConversationView(conv.id);
   setTemporaryMode(true);
   toggleConversationManageMode(false);
   updateArchiveViewButton();
@@ -761,9 +767,10 @@ async function startTemporaryConversation() {
 }
 
 // 真正创建会话（绑定可选的项目目录）并进入
-async function startConvWithProject(projectPath = '') {
-  if (state.running) {
-    alert('请先停止当前生成，再开始新对话。');
+async function startConvWithProject(projectPath = '', carryDraft = false) {
+  const serial = ++conversationOpenSerial;
+  if (state.temporaryConversation && state.running) {
+    alert('请先停止临时会话的生成。');
     return;
   }
   state.showArchived = false;
@@ -777,12 +784,14 @@ async function startConvWithProject(projectPath = '') {
     project_path: conv.project_path || '',
     archived: false,
   });
-  state.currentConvId = conv.id;
+  if (serial !== conversationOpenSerial) return;
+  switchConversationView(conv.id, carryDraft);
   convTitle.textContent = conv.title;
   hideHome();
   renderConvList(searchInput.value);
   chatMessages.innerHTML = '';
   updateContextBar(0, 80000);
+  return conv.id;
 }
 
 // ── 主页（项目选择）────────────────────────────────────────────────
@@ -900,16 +909,17 @@ async function showProjectConvs(projectPath, projectName) {
 
 async function deleteConversation(convId) {
   if (!confirm('确定删除这条对话？')) return;
-  await window.pywebview.api.delete_conversation(convId);
+  const result = await window.pywebview.api.delete_conversation(convId);
+  if (result && result.ok === false) { alert(result.error); return; }
   state.conversations = state.conversations.filter(c => c.id !== convId);
   if (state.currentConvId === convId) {
-    chatMessages.innerHTML = '';
-    state.currentConvId = null;
+    switchConversationView(null);
     setTemporaryMode(false);
     convTitle.textContent = '';
     if (state.conversations.length > 0) await openConversation(state.conversations[0].id);
     else await newConversation();
   }
+  conversationViews.delete(convId);
   renderConvList(searchInput.value);
 }
 
@@ -930,7 +940,7 @@ async function showFirstConversationInCurrentView() {
     await openConversation(first.id);
     return;
   }
-  state.currentConvId = null;
+  switchConversationView(null);
   setTemporaryMode(false);
   convTitle.textContent = '';
   chatMessages.innerHTML = '';
@@ -991,7 +1001,7 @@ async function toggleArchiveView() {
       alert((discarded && discarded.error) || '临时会话仍在生成，暂时无法切换');
       return;
     }
-    state.currentConvId = null;
+    switchConversationView(null);
     setTemporaryMode(false);
   }
   state.showArchived = !state.showArchived;
@@ -1607,6 +1617,8 @@ function startAssistantStream() {
 
 // Called from Python via evaluate_js
 window.Chat = {
+  forConversation: receiveConversationEvent,
+  closeConversationDialogs() {}, // Scoped cleanup is handled by forConversation.
   appendToken(token) {
     removeTypingIndicator();
     // 本轮首个文本 token 到达 → 模型开口说话，打断连续工具调用，重置折叠计数
@@ -1800,8 +1812,11 @@ function removeTypingIndicator() {
 // ── Send message ──────────────────────────────────────────────────
 function setRunning(running) {
   state.running = running;
+  conversationView().running = running;
+  $('btn-undo').disabled = running || _undoUsed;
   btnSend.disabled = running;
   btnStop.disabled = !running;
+  renderConvList(searchInput.value);
 }
 
 // Paste image from clipboard into input
@@ -1856,7 +1871,7 @@ document.addEventListener('click', (e) => {
   }
 });
 btnSend.addEventListener('click', sendMessage);
-btnStop.addEventListener('click', () => window.pywebview.api.stop_generation());
+btnStop.addEventListener('click', () => window.pywebview.api.stop_generation(state.currentConvId));
 
 // ── Undo last message ────────────────────────────────────────────
 let _undoUsed = false;
@@ -1879,51 +1894,44 @@ function restoreUndoneInput(value) {
 }
 
 $('btn-undo').addEventListener('click', async () => {
-  if (!state.currentConvId) return;
-  if (_undoUsed) { return; }
+  if (!state.currentConvId || state.running || _undoUsed) return;
+  const convId = state.currentConvId;
   _undoUsed = true;
   $('btn-undo').disabled = true;
-  const undone = await window.pywebview.api.undo_last_message(state.currentConvId);
+  const undone = await window.pywebview.api.undo_last_message(convId);
   if (undone === null || undone === undefined) {
-    _undoUsed = false;
-    $('btn-undo').disabled = false;
+    Chat.forConversation(convId, () => { _undoUsed = false; setRunning(false); });
     return;
   }
-  // Reload conversation to reflect removed messages
-  const conv = await window.pywebview.api.open_conversation(state.currentConvId);
-  if (conv) {
-    loadHistory(conv.messages || []);
-    Chat.updateFileOps(conv.file_ops || []);
-  }
-  // Restore structured attachments, not just their display path markers.
-  restoreUndoneInput(undone);
-  msgInput.focus();
-  setRunning(false);
-  _streamBubble = null;
-  _streamContent = '';
-  _streamingConvId = null;
-  _streamNodes = [];
+  const conv = await window.pywebview.api.open_conversation(convId);
+  Chat.forConversation(convId, () => {
+    if (conv) { loadHistory(conv.messages || []); Chat.updateFileOps(conv.file_ops || []); }
+    restoreUndoneInput(undone);
+    msgInput.focus();
+    setRunning(false);
+    _streamBubble = null;
+    _streamContent = '';
+    _streamingConvId = null;
+    _streamNodes = [];
+  });
 });
 
 // ── Retry last message ───────────────────────────────────────────
 $('btn-retry').addEventListener('click', async () => {
   if (!state.currentConvId || state.running) return;
-  // Undo last exchange, then immediately resend
-  const undone = await window.pywebview.api.undo_last_message(state.currentConvId);
+  const convId = state.currentConvId;
+  const undone = await window.pywebview.api.undo_last_message(convId);
   if (undone === null || undone === undefined) return;
-  // Reload conversation
-  const conv = await window.pywebview.api.open_conversation(state.currentConvId);
-  if (conv) {
-    loadHistory(conv.messages || []);
-    Chat.updateFileOps(conv.file_ops || []);
-  }
-  _streamBubble = null;
-  _streamContent = '';
-  _streamingConvId = null;
-  _streamNodes = [];
-  // Use the normal send path so image attachments survive retry.
-  restoreUndoneInput(undone);
-  await sendMessage();
+  const conv = await window.pywebview.api.open_conversation(convId);
+  Chat.forConversation(convId, async () => {
+    if (conv) { loadHistory(conv.messages || []); Chat.updateFileOps(conv.file_ops || []); }
+    _streamBubble = null;
+    _streamContent = '';
+    _streamingConvId = null;
+    _streamNodes = [];
+    restoreUndoneInput(undone);
+    await sendMessage();
+  });
 });
 
 // ── Model debate ─────────────────────────────────────────────────
@@ -2005,7 +2013,9 @@ async function sendMessage() {
     return;
   }
   const isHomeVisible = !$('home-view').classList.contains('hidden');
-  if (isHomeVisible || !state.currentConvId) await startConvWithProject('');
+  if (isHomeVisible || !state.currentConvId) {
+    if (!await startConvWithProject('', true)) return;
+  }
 
   // Reset undo state — user sent a new message, allow undo again
   _undoUsed = false;
@@ -2030,7 +2040,16 @@ async function sendMessage() {
   const files = state.attachedFiles.map(f => ({ name: f.name, path: f.path, content: f.content }));
   clearFileChips();
 
-  await window.pywebview.api.send_message(state.currentConvId, text, files);
+  const sentConvId = state.currentConvId;
+  try {
+    const result = await window.pywebview.api.send_message(sentConvId, text, files);
+    if (result && result.ok === false) throw new Error(result.error);
+  } catch (error) {
+    Chat.forConversation(sentConvId, () => {
+      Chat.showError(String(error));
+      if (!msgInput.value) restoreUndoneInput({text, files});
+    }, 'done');
+  }
 }
 
 // ── Slash command menu ────────────────────────────────────────────
