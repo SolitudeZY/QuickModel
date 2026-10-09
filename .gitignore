@@ -42,6 +42,7 @@ tests/*
 !tests/frontend_clipboard.cjs
 !tests/frontend_sessions.cjs
 !tests/test_parallel_conversations.py
+!tests/test_updater.py
 *_generated_*.png
 矩阵运算*.md
 newton_bisection.tex

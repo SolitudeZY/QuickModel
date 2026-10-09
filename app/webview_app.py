@@ -1678,7 +1678,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             return {"error": str(e)}
 
     def apply_update_and_restart(self, downloaded_path: str) -> dict:
-        """Generate a script to replace current exe and restart. Returns {ok: bool} or {error: str}."""
+        """Hand off installation before closing the app. Returns ok or error."""
         import sys
         import subprocess
         import tempfile
@@ -1702,31 +1702,15 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                  f"dl_path={dl_path} dl_exists={dl_path.exists()} pid={os.getpid()}")
 
             if IS_WIN:
-                # 安装包模式（Inno Setup）：下载的是 QuickModel-Setup.exe，直接静默运行它。
-                # 由安装程序接管：关闭旧进程(/CLOSEAPPLICATIONS)、覆盖安装、安装末尾拉起新版。
-                # 彻底绕开旧 onefile 时代手写 bat 替换 exe + _MEI/DLL 加载冲突的所有坑。
-                if not dl_path.exists():
-                    _log(f"setup 不存在: {dl_path}")
-                    return {"error": f"安装包不存在: {dl_path}"}
-                # 先销毁 WebView 窗口，再启动安装器。之前先启动 Inno 再 destroy，
-                # 可能在 WebView2 子进程释放 vcruntime140.dll 前开始复制。
+                if not getattr(sys, 'frozen', False):
+                    return {"error": "源码运行模式不支持自动覆盖安装，请手动运行下载的安装包。"}
+                from app.updater import launch_windows_update
+                helper_pid = launch_windows_update(dl_path, current_exe, os.getpid(), log_path.parent)
+                _log(f"独立更新进程已就绪 pid={helper_pid}，安装目录={current_dir}")
+                # Closing the last window ends the daemon bridge thread. All
+                # remaining work must already belong to the detached helper.
                 if self._window:
-                    try:
-                        self._window.destroy()
-                        _log("已请求关闭窗口，等待 WebView2 释放文件句柄")
-                    except Exception as close_error:
-                        _log(f"关闭窗口时出现异常（继续交给安装器处理）: {close_error}")
-                time.sleep(3.0)
-                args = [str(dl_path), "/SILENT", "/CLOSEAPPLICATIONS", "/NORESTART"]
-                _log(f"等待完成，即将运行安装程序: {args}")
-                try:
-                    proc = subprocess.Popen(args, creationflags=0x00000008)  # DETACHED_PROCESS
-                    _log(f"安装程序已启动 pid={proc.pid}")
-                except Exception as pe:
-                    _log(f"启动安装程序失败: {pe}")
-                    return {"error": f"启动安装程序失败: {pe}"}
-                # 主动退出本进程，让安装程序能覆盖文件（installer 的 CloseApplications 也会兜底关它）
-                _log("安装程序已接管，当前进程即将退出")
+                    self._window.destroy()
                 return {"ok": True}
             else:
                 # macOS: shell script。frozen .app 时 sys.executable 是
