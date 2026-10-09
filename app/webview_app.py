@@ -1,4 +1,5 @@
 import json
+import copy
 import os
 import threading
 import time
@@ -191,6 +192,8 @@ class API:
         self._config = load_config()
         self._agent = None
         self._running = False
+        self._sessions = {}
+        self._sessions_lock = threading.RLock()
         self._confirm_event = threading.Event()
         self._confirm_result = False
         self._ask_event = threading.Event()
@@ -261,11 +264,60 @@ class API:
             save_conversation(conv)
 
     def _discard_temporary_conversations(self) -> None:
-        getattr(self, '_temporary_conversations', {}).clear()
+        for conv_id in list(getattr(self, '_temporary_conversations', {})):
+            if not self._conversation_running(conv_id):
+                self._temporary_conversations.pop(conv_id, None)
+
+    def _conversation_running(self, conv_id):
+        session = getattr(self, '_sessions', {}).get(conv_id)
+        return bool(session and (session._running or session._dispatching)) or bool(
+            getattr(self, '_running', False) and conv_id == getattr(self, '_current_conv_id', None))
+
+    def _running_conversations(self):
+        ids = set(getattr(self, '_sessions', {}))
+        ids.add(getattr(self, '_current_conv_id', None))
+        return [cid for cid in ids if cid and self._conversation_running(cid)]
+
+    def _dispatch_conversation(self, conv_id, method, *args):
+        """Each conversation owns its agent, managers, events and callback receiver."""
+        with self._sessions_lock:
+            if self._conversation_running(conv_id):
+                return {'ok': False, 'error': '该会话正在生成'}
+            previous = self._sessions.get(conv_id)
+            session = copy.copy(self)
+            session._session_id = conv_id
+            session._current_conv_id = conv_id
+            session._running = False
+            session._dispatching = True
+            session._agent = None
+            session._config = copy.deepcopy(self._config)
+            for name in ('confirm', 'ask', 'secret', 'plan'):
+                setattr(session, f'_{name}_event', threading.Event())
+            session._debate_stop_event = threading.Event()
+            session._cmd_prefix_counts = {}
+            for name in ('_todo', '_tasks', '_bg'):
+                setattr(session, name, getattr(previous, name, None))
+            self._sessions[conv_id] = session
+        try:
+            getattr(session, method)(conv_id, *args)
+            return {'ok': True}
+        except Exception as exc:
+            session._running = False
+            session._js(f'Chat.showError({json.dumps(str(exc))})')
+            return {'ok': False, 'error': str(exc)}
+        finally:
+            session._dispatching = False
 
     def _js(self, code: str):
         """Thread-safe evaluate_js."""
         if self._window:
+            if getattr(self, '_session_id', None):
+                kind = ('title' if code.startswith('Chat.updateConvTitle(') else
+                        'dialogEnd' if code.startswith('Chat.closeConversationDialogs(') else
+                        'done' if code.startswith(('Chat.finishMessage(', 'Chat.showError(')) else
+                        'dialog' if code.startswith(('Chat.showConfirmDialog(', 'showAskDialog(',
+                                                     'showSecretDialog(', 'showPlanApproval(')) else 'event')
+                code = f'Chat.forConversation({json.dumps(self._session_id)}, () => {{{code}}}, {json.dumps(kind)})'
             self._window.evaluate_js(code)
 
     def _is_window_focused(self) -> bool:
@@ -527,6 +579,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         return import_external_model_configs(candidate_ids, project_path)
 
     def shutdown(self) -> None:
+        for conv_id in self._running_conversations():
+            self.stop_generation(conv_id)
         self._discard_temporary_conversations()
         self._mcp.shutdown()
 
@@ -558,7 +612,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         }
 
     def discard_temporary_conversation(self, conv_id: str = '') -> dict:
-        if self._running and conv_id == getattr(self, '_current_conv_id', None):
+        if self._conversation_running(conv_id):
             return {'ok': False, 'error': '请先停止当前生成'}
         if conv_id:
             removed = self._temporary_conversations.pop(conv_id, None) is not None
@@ -583,19 +637,21 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         }
 
     def delete_conversation(self, conv_id: str) -> None:
+        if self._conversation_running(conv_id):
+            return {'ok': False, 'error': '正在生成的会话不能删除'}
         if self._temporary_conversations.pop(conv_id, None) is not None:
             return
         delete_conversation(conv_id)
 
     def bulk_delete_conversations(self, conv_ids: list) -> dict:
         ids = [item for item in (conv_ids or []) if isinstance(item, str)]
-        if self._running and getattr(self, '_current_conv_id', None) in ids:
+        if any(self._conversation_running(cid) for cid in ids):
             return {'ok': False, 'error': '当前正在生成的会话不能删除', 'deleted': 0}
         return {'ok': True, 'deleted': delete_conversations(ids)}
 
     def bulk_archive_conversations(self, conv_ids: list, archived: bool = True) -> dict:
         ids = [item for item in (conv_ids or []) if isinstance(item, str)]
-        if self._running and getattr(self, '_current_conv_id', None) in ids:
+        if any(self._conversation_running(cid) for cid in ids):
             return {'ok': False, 'error': '当前正在生成的会话不能归档', 'updated': 0}
         return {
             'ok': True,
@@ -642,12 +698,14 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         return search_conversation_data(keyword)
 
     def set_conversation_archived(self, conv_id: str, archived: bool = True) -> dict:
+        if self._conversation_running(conv_id):
+            return {'ok': False, 'error': '正在生成的会话不能归档'}
         return {"ok": set_conversation_archived(conv_id, bool(archived))}
 
     def set_project_archived(self, project_path: str, archived: bool = True) -> dict:
         target_key = project_path_key(project_path)
-        if getattr(self, '_running', False) and target_key:
-            current = self._load_conversation(getattr(self, '_current_conv_id', ''))
+        for conv_id in self._running_conversations():
+            current = self._load_conversation(conv_id)
             if current and project_path_key(current.get('project_path', '')) == target_key:
                 return {
                     "ok": False,
@@ -718,13 +776,13 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 if parent.exists():
                     _sp.Popen(['explorer', str(parent)])
 
-    def get_file_diff(self, path: str) -> dict:
+    def get_file_diff(self, path: str, conv_id: str = '') -> dict:
         """返回某文件「首次改动前 baseline → 当前磁盘内容」的累计 diff，供前端渲染绿红视图。
 
         返回 {ok, path, added, removed, lines:[{type, text, oldNo, newNo}]}；
         type ∈ hunk/ctx/add/del。无 baseline（旧会话或大文件未存快照）或文件已删除时返回 {ok:False, reason}。"""
         import difflib
-        conv = self._load_conversation(self._current_conv_id) if getattr(self, '_current_conv_id', None) else None
+        conv = self._load_conversation(conv_id or getattr(self, '_current_conv_id', ''))
         if not conv:
             return {'ok': False, 'reason': '当前没有打开的会话'}
         baselines = conv.get('file_baselines', {})
@@ -1006,11 +1064,14 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
 
     # ── Agent / send ──────────────────────────────────────────────
     def send_message(self, conv_id: str, text: str, files: list) -> None:
+        if hasattr(self, '_sessions') and not getattr(self, '_session_id', None):
+            return self._dispatch_conversation(conv_id, 'send_message', text, files)
         if self._running:
             return
         self._current_conv_id = conv_id
         conv = self._load_conversation(conv_id)
         if not conv:
+            self._js('Chat.showError("会话不存在，请重新打开或新建会话")')
             return
 
         # Compression is a local command, not an instruction requiring a model round.
@@ -1125,7 +1186,15 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 on_notice=self._on_notice,
             )
 
-        threading.Thread(target=run, daemon=True).start()
+        threading.Thread(target=lambda: self._run_guarded(run, conv), daemon=True).start()
+
+    def _run_guarded(self, run, conv):
+        try:
+            run()
+        except Exception as exc:
+            self._on_error(conv, str(exc), conv['messages'])
+        finally:
+            self._running = False
 
     def _start_agent(self, conv: dict, compact_only: bool = False) -> None:
         """Start agent for an already-prepared conv (used by slash commands)."""
@@ -1181,16 +1250,29 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 compact_only=compact_only,
             )
 
-        threading.Thread(target=run, daemon=True).start()
+        threading.Thread(target=lambda: self._run_guarded(run, conv), daemon=True).start()
 
-    def stop_generation(self) -> None:
+    def stop_generation(self, conv_id: str = '') -> None:
+        if not getattr(self, '_session_id', None) and conv_id:
+            session = getattr(self, '_sessions', {}).get(conv_id)
+            if session:
+                session.stop_generation()
+            return
         if self._agent:
             self._agent.stop()
+        self._confirm_result = False
+        self._plan_approved = False
+        self._ask_answer = ''
+        self._secret_answer = ''
+        for name in ('confirm', 'ask', 'secret', 'plan'):
+            getattr(self, f'_{name}_event').set()
         self._debate_stop = True
         self._debate_stop_event.set()
 
     def undo_last_message(self, conv_id: str):
         """Undo a real user turn, preserving image attachments for resend."""
+        if self._conversation_running(conv_id):
+            return None
         if self._running:
             self._agent.stop()
             import time
@@ -1228,6 +1310,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         return None
 
     def debate_review(self, conv_id: str, selected_indices: list, model_config_name: str, user_prompt: str = '') -> None:
+        if hasattr(self, '_sessions') and not getattr(self, '_session_id', None):
+            return self._dispatch_conversation(conv_id, 'debate_review', selected_indices, model_config_name, user_prompt)
         """Send selected messages to another model for objective review."""
         conv = self._load_conversation(conv_id)
         if not conv:
@@ -1395,6 +1479,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             if is_command_allowed(cmd):
                 return True
         self._confirm_event.clear()
+        self._confirm_result = False
         # Check if we should suggest a wildcard pattern
         wildcard = ""
         if tool_name == "run_command":
@@ -1408,16 +1493,28 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         # Notify user if window is in background
         cmd_preview = args.get("command", tool_name)[:50] if tool_name in ("run_command", "ssh_exec") else tool_name
         self._notify_system("需要确认执行", f"工具: {cmd_preview}")
-        if not self._confirm_event.wait(timeout=120):
+        answered = self._confirm_event.wait(timeout=120)
+        self._js('Chat.closeConversationDialogs()')
+        if not answered:
             # Timeout — treat as rejection to avoid permanent deadlock
             return False
         return self._confirm_result
 
-    def confirm_tool(self, approved: bool) -> None:
+    def confirm_tool(self, approved: bool, conv_id: str = '') -> None:
+        if conv_id and not getattr(self, '_session_id', None):
+            session = self._sessions.get(conv_id)
+            if session:
+                session.confirm_tool(approved)
+            return
         self._confirm_result = approved
         self._confirm_event.set()
 
-    def confirm_tool_always(self, command: str) -> None:
+    def confirm_tool_always(self, command: str, conv_id: str = '') -> None:
+        if conv_id and not getattr(self, '_session_id', None):
+            session = self._sessions.get(conv_id)
+            if session:
+                session.confirm_tool_always(command)
+            return
         add_allowed_command(command)
         # Reset prefix counter if it's a wildcard pattern
         prefix = command.replace(" *", "").replace("*", "").strip()
@@ -1435,14 +1532,22 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             options = []
         multi_select = args.get("multi_select", False)
         self._ask_event.clear()
+        self._ask_answer = ''
         self._js(f'showAskDialog({json.dumps(question)}, {json.dumps(options)}, {json.dumps(multi_select)})')
         # Notify user if window is in background
         self._notify_system("AI 需要你的输入", question[:60])
-        if not self._ask_event.wait(timeout=120):
+        answered = self._ask_event.wait(timeout=120)
+        self._js('Chat.closeConversationDialogs()')
+        if not answered:
             return "用户未响应（超时）"
         return self._ask_answer
 
-    def answer_question(self, answer: str) -> None:
+    def answer_question(self, answer: str, conv_id: str = '') -> None:
+        if conv_id and not getattr(self, '_session_id', None):
+            session = self._sessions.get(conv_id)
+            if session:
+                session.answer_question(answer)
+            return
         """JS calls this when user submits answer."""
         self._ask_answer = answer
         self._ask_event.set()
@@ -1459,11 +1564,18 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         self._secret_event.clear()
         self._js(f'showSecretDialog({json.dumps("ssh_password")}, {json.dumps(host)}, {json.dumps(username)}, {json.dumps(port)})')
         self._notify_system("需要 SSH 密码", f"{username}@{host}:{port}")
-        if not self._secret_event.wait(timeout=120):
+        answered = self._secret_event.wait(timeout=120)
+        self._js('Chat.closeConversationDialogs()')
+        if not answered:
             return ""
         return self._secret_answer
 
-    def answer_secret(self, value: str) -> None:
+    def answer_secret(self, value: str, conv_id: str = '') -> None:
+        if conv_id and not getattr(self, '_session_id', None):
+            session = self._sessions.get(conv_id)
+            if session:
+                session.answer_secret(value)
+            return
         """JS calls this when user submits a one-off secret."""
         self._secret_answer = value or ""
         self._secret_event.set()
@@ -1471,12 +1583,20 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
     def _on_plan_approve(self, plan_summary: str) -> bool:
         """Callback: agent exits plan mode, asks user to approve."""
         self._plan_event.clear()
+        self._plan_approved = False
         self._js(f'showPlanApproval({json.dumps(plan_summary)})')
-        if not self._plan_event.wait(timeout=120):
+        answered = self._plan_event.wait(timeout=120)
+        self._js('Chat.closeConversationDialogs()')
+        if not answered:
             return False
         return self._plan_approved
 
-    def approve_plan(self, approved: bool) -> None:
+    def approve_plan(self, approved: bool, conv_id: str = '') -> None:
+        if conv_id and not getattr(self, '_session_id', None):
+            session = self._sessions.get(conv_id)
+            if session:
+                session.approve_plan(approved)
+            return
         """JS calls this when user approves/rejects plan."""
         self._plan_approved = approved
         self._plan_event.set()
