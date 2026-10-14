@@ -1,6 +1,6 @@
 # QuickModel
 
-Windows / macOS 桌面 AI Agent，支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 以及各类 OpenAI 兼容服务。基于 pywebview（WebView2 / WebKit）+ Python 后端构建，集成文件与命令操作、联网检索、MCP、浏览器控制、SSH、多 Agent 协作、图片理解与生成。
+用你自己的便宜模型，跑一个 Claude Code 式的桌面 Agent。开源、免费、代码全在你手里。日常的 AI 工作不需要最贵的模型，你只需要一个属于你自己的 Agent。
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -9,6 +9,12 @@ Windows / macOS 桌面 AI Agent，支持 OpenAI Chat Completions、OpenAI Respon
 中文 | [English](./README.en.md)
 
 > 详细图文教程请参阅 [使用说明](./使用说明.md) | [MCP 使用指南](./MCP使用指南.md) | [主流 LLM 模型的 API Base URL 汇总](./主流%20LLM%20模型的%20API%20Base%20URL%20汇总.md)
+
+ ## 30 秒上手
+
+1. 从 [Releases](https://github.com/SolitudeZY/QuickModel/releases) 下载 `QuickModel-Setup.exe`（Windows）或 `.app` 压缩包（macOS）；也可源码运行：`git clone` → `pip install -r requirements.txt` → `python main.py`
+2. 打开 **设置 → 模型配置**，填任意服务商的 API Key / Base URL / 模型名（也能从 Claude Code / Codex 一键导入）
+3. 开聊。要联网就开搜索，要 OCR 就把图拖进来。
 
 ## 近期更新
 
