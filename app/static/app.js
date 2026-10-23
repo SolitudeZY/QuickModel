@@ -1814,8 +1814,7 @@ function setRunning(running) {
   state.running = running;
   conversationView().running = running;
   $('btn-undo').disabled = running || _undoUsed;
-  btnSend.disabled = running;
-  btnStop.disabled = !running;
+  renderMessageQueue();
   renderConvList(searchInput.value);
 }
 
@@ -1870,8 +1869,8 @@ document.addEventListener('click', (e) => {
     window.pywebview.api.open_url(a.href);
   }
 });
-btnSend.addEventListener('click', sendMessage);
-btnStop.addEventListener('click', () => window.pywebview.api.stop_generation(state.currentConvId));
+btnSend.addEventListener('click', () => sendMessage());
+btnStop.addEventListener('click', () => stopMessageQueue(state.currentConvId));
 
 // ── Undo last message ────────────────────────────────────────────
 let _undoUsed = false;
@@ -1998,14 +1997,14 @@ $('btn-debate-send').addEventListener('click', async () => {
   if (!modelName) { alert('请选择评审模型'); return; }
   $('debate-overlay').classList.add('hidden');
   // Show stream bubble for the debate response
+  conversationView().awaitingReady = true;
   startAssistantStream();
   scrollToBottom(true);
   setRunning(true);
   await window.pywebview.api.debate_review(state.currentConvId, indices, modelName, userPrompt);
 });
 
-async function sendMessage() {
-  if (state.running) return;
+async function sendMessage(immediate = false) {
   const text = msgInput.value.trim();
   if (!text && state.attachedFiles.length === 0) return;
   if (state.attachedFiles.some(f => f.loading || !f.path)) {
@@ -2016,40 +2015,10 @@ async function sendMessage() {
   if (isHomeVisible || !state.currentConvId) {
     if (!await startConvWithProject('', true)) return;
   }
-
-  // Reset undo state — user sent a new message, allow undo again
-  _undoUsed = false;
-  $('btn-undo').disabled = false;
-
-  msgInput.value = '';
-  // 实时构造与后端一致的附件标记，让用户气泡即时显示缩略图（否则要刷新会话、
-  // 重新从带标记的历史 JSON 加载才显示）。格式同 webview_app.send_message：
-  // [图片: 名称 路径: 绝对路径] / [附件: 名称 路径: 绝对路径]，附件标记在前、文字在后。
-  const imgExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
-  const markers = state.attachedFiles.map(f => {
-    const ext = (f.name.split('.').pop() || '').toLowerCase();
-    const kind = imgExts.includes(ext) ? '图片' : '附件';
-    return f.path ? `[${kind}: ${f.name} 路径: ${f.path}]` : `[${kind}: ${f.name}]`;
-  });
-  const bubbleText = [...markers, text].filter(Boolean).join('\n\n');
-  addUserBubble(bubbleText || '[附件]');
-  startAssistantStream();
-  scrollToBottom(true);
-  setRunning(true);
-
   const files = state.attachedFiles.map(f => ({ name: f.name, path: f.path, content: f.content }));
+  if (!enqueueMessage(state.currentConvId, text, files, immediate)) return;
+  msgInput.value = '';
   clearFileChips();
-
-  const sentConvId = state.currentConvId;
-  try {
-    const result = await window.pywebview.api.send_message(sentConvId, text, files);
-    if (result && result.ok === false) throw new Error(result.error);
-  } catch (error) {
-    Chat.forConversation(sentConvId, () => {
-      Chat.showError(String(error));
-      if (!msgInput.value) restoreUndoneInput({text, files});
-    }, 'done');
-  }
 }
 
 // ── Slash command menu ────────────────────────────────────────────
@@ -2059,7 +2028,7 @@ let _slashIdx = 0;
 // Static built-in commands + dynamic skill entries
 const BUILTIN_CMDS = [
   { cmd: '/new',     desc: '新建对话（自动读取记忆）', action: async () => { slashMenuHide(); await newConvWithMemory(); } },
-  { cmd: '/compact', desc: '手动压缩上下文',           action: () => { slashMenuHide(); msgInput.value = ''; window.pywebview.api.send_message(state.currentConvId, '__slash_compact__', []); } },
+  { cmd: '/compact', desc: '手动压缩上下文',           action: () => { slashMenuHide(); msgInput.value = '/compact'; sendMessage(); } },
   { cmd: '/skills',  desc: '管理技能库',               action: () => { slashMenuHide(); openSkillManager(); } },
   { cmd: '/memory',  desc: '查看记忆文件',             action: () => { slashMenuHide(); msgInput.value = '请列出并总结所有记忆文件内容。'; } },
 ];

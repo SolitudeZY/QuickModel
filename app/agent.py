@@ -392,9 +392,11 @@ class Agent:
         on_secret_input: Optional[Callable[[dict], str]] = None,
         on_notice: Optional[Callable[[str], None]] = None,
         compact_only: bool = False,
+        preserve_stop: bool = False,
     ):
         """在调用线程中同步运行（应在后台线程调用）。"""
-        self._stop_flag.clear()
+        if not preserve_stop:
+            self._stop_flag.clear()
         self._rounds_without_todo = 0
         self._subagent_results.clear()
         self._auto_compact_attempted = False

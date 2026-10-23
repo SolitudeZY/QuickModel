@@ -8,6 +8,8 @@ let dialogConversationId = null;
 function conversationView(id = state.currentConvId) {
   if (!conversationViews.has(id)) conversationViews.set(id, {
     draft: '', files: [], chips: [], nodes: null, running: false, events: [], runtime: null,
+    pendingMessages: [], queuePaused: false, queueSending: false, awaitingReady: false,
+    queueStopping: false, stopAfterSubmit: false, interruptPending: false,
   });
   return conversationViews.get(id);
 }
@@ -71,8 +73,9 @@ function switchConversationView(id, carryDraft = false) {
 }
 
 function receiveConversationEvent(id, callback, kind = 'event') {
-  if (kind === 'title') { callback(); return; }
+  if (kind === 'title' || kind === 'queueReady') { callback(); return; }
   const view = conversationView(id);
+  if (kind === 'start') view.running = true;
   if (kind === 'dialog') view.waiting = true;
   if (kind === 'done' || kind === 'dialogEnd') {
     if (kind === 'done') view.running = false;

@@ -192,6 +192,23 @@ class AgentProtocolTests(unittest.TestCase):
 
         compact.assert_called_once()
 
+    def test_pre_dispatch_stop_is_not_cleared_for_fresh_webview_agent(self):
+        agent = object.__new__(Agent)
+        agent._stop_flag = threading.Event()
+        agent._stop_flag.set()
+        agent._subagent_results = {}
+        agent.system_prompt = 'system'
+        agent.compact_threshold = 100
+        done, errors = [], []
+        messages = [{'role': 'user', 'content': 'cancel before first request'}]
+        with patch.object(agent, '_stream_and_parse') as stream:
+            agent.run(messages, lambda *_: None, lambda *_: None,
+                      lambda *_: None, lambda *_: True, done.append,
+                      lambda *args: errors.append(args), preserve_stop=True)
+        stream.assert_not_called()
+        self.assertEqual(done, [messages])
+        self.assertEqual(errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()

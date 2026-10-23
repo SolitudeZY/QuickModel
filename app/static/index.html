@@ -83,6 +83,8 @@
 
   <!-- 对话区 + Todo 面板 -->
   <div id="content-area">
+    <nav id="conversation-ruler" class="hidden" aria-label="对话跳转"></nav>
+    <div id="ruler-preview" class="hidden" role="tooltip"></div>
     <div id="chat-area">
       <!-- 主页（点击新对话时显示，选择项目后进入会话）-->
       <div id="home-view" class="hidden">
@@ -104,11 +106,11 @@
         </div>
       </div>
       <div id="chat-messages"></div>
-      <div id="chat-nav">
-        <button id="btn-nav-prev" class="btn-nav" title="上一次用户输入">↑</button>
-        <button id="btn-nav-next" class="btn-nav" title="下一次用户输入">↓</button>
-        <button id="btn-nav-bottom" class="btn-nav" title="滚动到底部">⤓</button>
-      </div>
+    </div>
+    <div id="chat-nav">
+      <button id="btn-nav-prev" class="btn-nav" title="上一次用户输入">↑</button>
+      <button id="btn-nav-next" class="btn-nav" title="下一次用户输入">↓</button>
+      <button id="btn-nav-bottom" class="btn-nav" title="滚动到底部">⤓</button>
     </div>
     <!-- Todo 面板（模型使用 todo_write 时显示）-->
     <div id="todo-panel" class="hidden">
@@ -138,6 +140,12 @@
 
   <!-- 输入区 -->
   <footer id="input-area">
+    <section id="message-queue" class="hidden" aria-label="待发送消息">
+      <div class="queue-heading"><span id="queue-status" role="status"></span>
+        <button id="btn-queue-resume" class="btn-action-pill hidden">继续发送</button>
+      </div>
+      <ol id="queue-items"></ol>
+    </section>
     <div id="file-chips"></div>
     <!-- slash 命令补全 -->
     <ul id="slash-menu" class="hidden"></ul>
@@ -145,6 +153,7 @@
       <textarea id="msg-input" placeholder="输入消息… (Enter 发送，Shift+Enter 换行)" rows="3"></textarea>
       <div id="input-btns">
         <button id="btn-send" class="btn-primary">发送</button>
+        <button id="btn-send-now" class="btn-secondary hidden" title="中断当前生成，优先发送输入框中的内容">中断并发送</button>
         <button id="btn-stop" class="btn-danger" disabled>停止</button>
       </div>
     </div>
@@ -792,5 +801,7 @@
 <script src="vendor/raindrop-fx.min.js"></script>
 <script src="starfield.js"></script>
 <script src="app.js"></script>
+<script src="message-queue.js"></script>
+<script src="conversation-ruler.js"></script>
 </body>
 </html>

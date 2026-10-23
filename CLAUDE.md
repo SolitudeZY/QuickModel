@@ -65,7 +65,7 @@
 `app.js` 曾达 2681 行，已按功能拆分。**全部文件共享同一全局作用域**（非 ES module），靠 `index.html` 里的加载顺序保证可用：
 
 ```
-vendor/* → core.js → sessions.js → render.js → drag.js → dialogs.js → settings.js → starfield.js → app.js
+vendor/* → core.js → sessions.js → render.js → drag.js → dialogs.js → settings.js → starfield.js → app.js → message-queue.js → conversation-ruler.js
 ```
 
 - `core.js`（~38 行）：`state`、`$`、DOM 引用（convList/chatMessages/msgInput/…）、`_convColors`/`_randomConvColor`。**必须最先加载**——其它文件顶层的 `$('btn-…').addEventListener` 在 load 时即执行，依赖 `$`/DOM 引用。
@@ -77,6 +77,10 @@ vendor/* → core.js → sessions.js → render.js → drag.js → dialogs.js �
 - `settings.js`：设置面板/命令白名单/更新检查/云同步/模型配置，及顶层按钮绑定。
 - `starfield.js`：分层背景引擎；双 Canvas 预渲染白天/黄昏/夜晚程序化城市，天气 Canvas 绘制云、雪、雾、光尘与星轨，雨/雷暴使用本地 MIT `raindrop-fx` WebGL2 折射层并带 Canvas 降级。暴露 `applyStarfieldSettings(config)` 给 `app.js`/`settings.js` 调用。
 - `app.js`：其余主逻辑——会话列表渲染、消息气泡、流式、send、slash 菜单、侧边面板、工具栏按钮、`Chat` 对象（后端 `evaluate_js('Chat.xxx()')` 的回调入口）、init。
+- `message-queue.js`：按会话维护窗口生命周期内的待发送队列（最多 5 条等待消息，不含已启动的一条）。生成期间 Enter 加入队列；输入框“中断并发送”或队列项“立即发送”优先发送选定内容，其余仍按原顺序等待。发送中附件使用入队快照；满队列保留输入。手动停止/请求失败暂停队列，用户点击“继续发送”恢复。队列不写磁盘，退出或刷新窗口会丢弃未发送项。
+- **队列交接约束**：`finishMessage` 仅表示消息渲染结束；必须等后端 `generationReady(conv_id, failed)` 才派发下一条。`_worker_active` 保证保存、同步等收尾期间会话仍被占用，`_notify_generation_ready` 同时等待 dispatch 和 worker 退出且只通知一次。`queueReady` 事件即使在后台会话也立即处理；流式 DOM 仍按原顺序回放。停止桥调用未返回前也不能启动新任务，防止迟到的 stop 杀掉下一条。WebView 每次新建 Agent 并以 `preserve_stop=True` 运行，保留初始化期间的停止请求。
+- `conversation-ruler.js`：聊天区左侧垂直居中的刻度对应 `.bubble-user[data-user-input="true"]`，排除工具图片/内部通知；悬停或键盘聚焦显示提问预览，点击/Enter 跳转，滚动更新当前刻度。鼠标远离时刻度收短，进入附近 96px 范围逐渐展开，纵向距离最近的刻度最长；用 requestAnimationFrame 插值伸缩，规避 WebView2 的 CSS transition 兼容问题，减少动态效果偏好下直接切换。只改变线长，点击区域和正文布局不随动画变化。刻度列表限高并独立滚动以容纳长会话。右下角旧导航相对于 content-area 定位，随队列高度变化，不能盖住输入区。
+- 本地回归：`python -m unittest tests.test_generation_ready tests.test_parallel_conversations tests.test_conversation_management tests.test_agent_protocols`；`node tests/frontend_queue_ruler.cjs` 和 `node tests/frontend_sessions.cjs`（Playwright + 本机 Edge）。前端使用模拟 Python 桥验证队列/导航；真实模型请求和 Windows/macOS 安装包需另行验收。
 
 **改动铁律（避免 ReferenceError / 重复声明崩溃）**：
 - 顶层 `const`/`let`/`function` 同名只能在**一个文件**出现（全局作用域重复声明 = SyntaxError）。

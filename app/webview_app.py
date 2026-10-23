@@ -270,7 +270,8 @@ class API:
 
     def _conversation_running(self, conv_id):
         session = getattr(self, '_sessions', {}).get(conv_id)
-        return bool(session and (session._running or session._dispatching)) or bool(
+        return bool(session and (session._running or session._dispatching
+                                 or getattr(session, '_worker_active', False))) or bool(
             getattr(self, '_running', False) and conv_id == getattr(self, '_current_conv_id', None))
 
     def _running_conversations(self):
@@ -289,6 +290,10 @@ class API:
             session._current_conv_id = conv_id
             session._running = False
             session._dispatching = True
+            session._worker_active = False
+            session._ready_sent = False
+            session._run_failed = False
+            session._cancel_requested = False
             session._agent = None
             session._config = copy.deepcopy(self._config)
             for name in ('confirm', 'ask', 'secret', 'plan'):
@@ -307,12 +312,27 @@ class API:
             return {'ok': False, 'error': str(exc)}
         finally:
             session._dispatching = False
+            session._notify_generation_ready()
+
+    def _notify_generation_ready(self):
+        """Release queued sends only after dispatch AND all worker writes finish."""
+        if not getattr(self, '_session_id', None):
+            return
+        with self._sessions_lock:
+            if (self._dispatching or self._worker_active or self._running or self._ready_sent):
+                return
+            self._ready_sent = True
+        self._js(f'Chat.generationReady({json.dumps(self._session_id)}, '
+                 f'{json.dumps(self._run_failed)})')
 
     def _js(self, code: str):
         """Thread-safe evaluate_js."""
+        if code.startswith('Chat.showError('):
+            self._run_failed = True
         if self._window:
             if getattr(self, '_session_id', None):
-                kind = ('title' if code.startswith('Chat.updateConvTitle(') else
+                kind = ('queueReady' if code.startswith('Chat.generationReady(') else
+                        'title' if code.startswith('Chat.updateConvTitle(') else
                         'dialogEnd' if code.startswith('Chat.closeConversationDialogs(') else
                         'done' if code.startswith(('Chat.finishMessage(', 'Chat.showError(')) else
                         'dialog' if code.startswith(('Chat.showConfirmDialog(', 'showAskDialog(',
@@ -1167,6 +1187,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         )
         self._agent._model_configs = self._config.get('model_configs', [])
         self._running = True
+        if getattr(self, '_cancel_requested', False):
+            self._agent.stop()
 
         def run():
             self._agent.run(
@@ -1184,8 +1206,10 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 on_ask_user=self._on_ask_user,
                 on_secret_input=self._on_secret_input,
                 on_notice=self._on_notice,
+                preserve_stop=True,
             )
 
+        self._worker_active = True
         threading.Thread(target=lambda: self._run_guarded(run, conv), daemon=True).start()
 
     def _run_guarded(self, run, conv):
@@ -1195,6 +1219,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             self._on_error(conv, str(exc), conv['messages'])
         finally:
             self._running = False
+            self._worker_active = False
+            self._notify_generation_ready()
 
     def _start_agent(self, conv: dict, compact_only: bool = False) -> None:
         """Start agent for an already-prepared conv (used by slash commands)."""
@@ -1229,6 +1255,8 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         )
         self._agent._model_configs = self._config.get('model_configs', [])
         self._running = True
+        if getattr(self, '_cancel_requested', False):
+            self._agent.stop()
         self._js('startAssistantStream(); setRunning(true);')
 
         def run():
@@ -1248,8 +1276,10 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 on_secret_input=self._on_secret_input,
                 on_notice=self._on_notice,
                 compact_only=compact_only,
+                preserve_stop=True,
             )
 
+        self._worker_active = True
         threading.Thread(target=lambda: self._run_guarded(run, conv), daemon=True).start()
 
     def stop_generation(self, conv_id: str = '') -> None:
@@ -1258,6 +1288,7 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
             if session:
                 session.stop_generation()
             return
+        self._cancel_requested = True
         if self._agent:
             self._agent.stop()
         self._confirm_result = False
@@ -1351,8 +1382,9 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
         )
 
         self._running = True
-        self._debate_stop = False
-        self._debate_stop_event.clear()
+        self._debate_stop = getattr(self, '_cancel_requested', False)
+        if not self._debate_stop:
+            self._debate_stop_event.clear()
 
         def run():
             try:
@@ -1381,7 +1413,10 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 self._js(f'Chat.showError({json.dumps(f"评审请求失败: {str(e)}")})')
             finally:
                 self._running = False
+                self._worker_active = False
+                self._notify_generation_ready()
 
+        self._worker_active = True
         threading.Thread(target=run, daemon=True).start()
 
     # ── Agent callbacks ───────────────────────────────────────────

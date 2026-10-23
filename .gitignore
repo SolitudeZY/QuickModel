@@ -43,6 +43,8 @@ tests/*
 !tests/frontend_sessions.cjs
 !tests/test_parallel_conversations.py
 !tests/test_updater.py
+!tests/test_generation_ready.py
+!tests/frontend_queue_ruler.cjs
 *_generated_*.png
 矩阵运算*.md
 newton_bisection.tex
