@@ -117,7 +117,8 @@ vendor/* → core.js → sessions.js → render.js → drag.js → dialogs.js �
 - 缓存优化：图片 Base64 **不进入持久会话、文本摘要或工具返回文本**。原生多模态模型仅在请求边界通过图片内容块接收编码；纯文本模型继续使用独立视觉工具。`TOOLS_SCHEMA`、system prompt 作为稳定前缀以命中 prompt cache。
 - **prompt cache 前缀稳定铁律（重要）**：DeepSeek 等 prompt cache 从头逐 token 比对前缀，遇到第一个不同 token 即从该点起全部 miss 重算。因此**绝不就地改写任何已发送过的历史消息内容**——一旦某条消息以某形态发给过 API，之后必须保持该形态。压缩历史只能用 `auto_compact`（超阈值时一次性折叠中段为摘要、保留 system 头 + 近期尾，低频、一次性失效后前缀重新稳定）。
   - ⚠ **已移除 microcompact**（曾在 `_manage_context` 每轮调用）：它按"距末尾 N 条"的滑动窗口就地把窗口外旧工具结果改写成 `[已压缩]`，但窗口边界随消息增长右移，导致位于前缀中间的历史消息被反复改写 → 每次都从该点截断缓存前缀。表现为**工具调用越多、缓存命中率越低**。教训：任何"随轮次移动的就地改写"都与 prompt cache 冲突，宁可多花上下文 token 也要保前缀稳定（DeepSeek 缓存 token 仅为 miss 的约 1/10）。
-  - **`auto_compact` 实现要点（`advanced_tools.py`，v1.7.4 大改，修复"压缩后失忆"）**：超 `compact_threshold` 时把 `system 头 + 中段摘要 + 近期尾` 重组；近期尾最多保留 15 条，并按阈值的 token 预算动态收缩，避免最近的大工具结果独占上下文、导致无中段可压缩。中段**分块摘要**（每块 ≤60000 字符逐块总结，多块再合并）——⚠ 旧实现是 `json.dumps(middle)[-80000:]` 只取尾部 8 万字符喂摘要，**中段一长前半段直接丢弃 → 失忆主因**（DeepSeek 爱"说一句→调几次工具"，工具结果堆满中段极易触发）。摘要 prompt 结构化、强制保留可继续工作的具体事实（文件路径/函数名/变量名原样、需求约束、决策、待办、工具关键结果）。**摘要失败必须 `return messages` 退化为不压缩**，绝不用错误串替换整个中段；自动压缩开始/成功/失败须经 Notice 告知用户，每次摘要请求最多 120 秒，默认总预算按分块及合并请求数量计算，显式 timeout_seconds 仍表示整个流程的总预算；显示分块/合并进度且响应停止按钮，同一次 Agent run 失败后不重复尝试。手动压缩失败时只能更新尚未发送的工具占位结果，绝不能 `clear()` 原消息。摘要走便宜模型：`agent._summary_model_config()` 优先取配置里名字含 `flash` 的模型，回退主模型。压缩结果经 `_on_done` 持久化回会话，下次从压缩后版本继续。
+  - **`auto_compact` 实现要点（`advanced_tools.py`，v1.7.4 大改，修复"压缩后失忆"；v1.9.21 提速）**：超 `compact_threshold` 时把 `system 头 + 中段摘要 + 近期尾` 重组；近期尾最多保留 15 条，并按阈值的 token 预算动态收缩，避免最近的大工具结果独占上下文、导致无中段可压缩。中段**分块摘要**（每块 ≤60000 字符逐块总结，多块再合并）——⚠ 旧实现是 `json.dumps(middle)[-80000:]` 只取尾部 8 万字符喂摘要，**中段一长前半段直接丢弃 → 失忆主因**（DeepSeek 爱"说一句→调几次工具"，工具结果堆满中段极易触发）。摘要 prompt 结构化、强制保留可继续工作的具体事实（文件路径/函数名/变量名原样、需求约束、决策、待办、工具关键结果）。**摘要失败必须 `return messages` 退化为不压缩**，绝不用错误串替换整个中段；自动压缩开始/成功/失败须经 Notice 告知用户；显示分块/合并进度且响应停止按钮，同一次 Agent run 失败后不重复尝试。手动压缩失败时只能更新尚未发送的工具占位结果，绝不能 `clear()` 原消息。摘要走便宜模型：`agent._summary_model_config()` 优先取配置里名字含 `flash` 的模型，回退主模型。压缩结果经 `_on_done` 持久化回会话，下次从压缩后版本继续。
+    - **v1.9.21 提速要点（保持"不丢正文"）**：① 分块摘要并行（`MAX_PARALLEL_SUMMARIES=4`、`ThreadPoolExecutor`，按原始顺序合并，进度只从协调线程上报）；② 单块输出 ≤1200 tokens、合并 ≤1600；③ 单请求 60s、合并 45s，默认总预算按波次 `120*(waves+2)`（显式 `timeout_seconds` 仍是总上限）；④ `_summary_safe_message` 只裁剪 `tool` 结果（3000 字符，首尾保留）与 `tool_call.arguments`（2000 字符），**user/assistant 正文不裁剪**（`tests/test_model_callers.py` 的 130000 字符用例守着）。完整原文仍存 `transcripts/`。
 
 ## 图片理解（原生多模态 + 独立视觉工具）
 
@@ -232,6 +233,28 @@ vendor/* → core.js → sessions.js → render.js → drag.js → dialogs.js �
 - **⚠ stale-memory 覆盖坑（已修）**：`send_message` 在 run 开始时加载 `conv` 并持有引用；run 期间 `_track_file_op` 用 `load_conversation` 取**新副本**写入 file_ops/file_baselines 存盘。若 `_on_done`/`_on_error` 直接 `save_conversation(那个旧引用)`，会用不含这两字段的旧内存覆盖磁盘 → 点开 diff 报「没有改动记录」（面板仍显示 +N 是因为来自 run 中途的 `updateFileOps` 实时推送，内存态）。修复：`_on_done`/`_on_error` 保存前调 `_merge_disk_file_tracking(conv)` 从磁盘回读 file_ops/file_baselines 补回内存对象。同 [[config-import-memory-reload]] 通病——**任何 run 期间经旁路写盘的会话字段，结束时用 stale conv 保存都会被覆盖**。
 - **前端**：`app.js` `updateFileOps` 显示绿红计数；点击 `openDiffModal(path)` → `get_file_diff` → 渲染 `#diff-overlay` 模态框（`.diff-add/.diff-del/.diff-ctx/.diff-hunk`），含「打开位置」按钮复用 `open_file_location`。Esc/点遮罩关闭。
 - **缓存戳**：前端文件改动靠 mtime 自动 `?v=` 破坏，重启 app 生效（见「静态资源缓存破坏」）。
+
+## 工具调用展示样式与结果文件定位（v1.9.21）
+
+- **两种展示样式**：`config.tool_call_style` = `bubble`（默认，现有气泡卡片）| `record`（DeepSeek harness 风格的紧凑执行记录）。设置入口在「外观与天气 → 工具调用展示」，`settings.js` 保存后调 `applyToolCallStyle()`；`app.js` init 时也调一次。
+- **只切外观、不复制渲染逻辑（关键）**：`applyToolCallStyle()` 只写 `document.body.dataset.toolStyle`，样式全部在 `style.css` 的 `body[data-tool-style="record"] .bubble-tool-call …`；DOM 结构仍是共用的 `.tool-header` + `.tool-body`（展开靠 `.tool-expanded`）。新增工具或改渲染时**不要在两种样式里各写一套**。
+- **状态标记**：`addToolCallBubble` 在 header 写入 `.tool-status`（运行中）；`addToolResultBubble` 用 `_markToolStatus()` 改成「完成/失败」并加 `.tool-failed`。气泡样式里该元素 `display:none`，记录样式才显示。
+- **结果里的文件定位按钮**：`_appendLocateActions(bubble, result)` 从结果文本提取候选路径 —— ① `[图片/附件: 名称 路径: …]` 标记（视为权威）；② 正文里形如 `D:\…` / `/…` 且末段带扩展名的绝对路径。候选经新增 API `webview_app.paths_exist(paths)` 过滤成真正存在的文件后，渲染 `.tool-file-actions`（「📂 定位文件」+ 文件名 chip）**追加到 `.tool-body` 内**，因此收起时不显示、展开才出现（用户明确要求），点击复用 `open_file_location`。旧的 `_appendFileLinks`（只给 write_file/apply_patch、挂在气泡根部）已删除。
+- **展开区展示完整结果**：文本结果在 `.tool-result-content` 里显示完整内容（>20000 字符截断并注明），不再只放 200 字符预览；`.tool-body` 已有 `max-height:280px` 内部滚动兜底。
+- **设置里的 API Key 显隐**：设置弹窗头部 `#btn-toggle-secrets`（👁 显示密钥 / 🙈 隐藏密钥）→ `settings.js setSecretsVisible()` 把 `#settings-modal` 内所有 `type=password`（含已切换过的 `data-secret-field`）临时改成 `text`。**不写 config**，打开/关闭/保存设置时自动复位；`#secret-input`（连接密钥弹窗）不在设置面板内，刻意不受影响。
+- 回归：`node tests/frontend_tool_style.cjs`（可用 `QM_PLAYWRIGHT` 指向 playwright 包目录；默认 Edge）。
+
+## 主题 × 天气对比度（v1.9.21）
+
+动态背景 + 半透明玻璃下，**面板透明度保持不变**（`tests/test_theme_contrast.py` 锁 ≤0.24 与黄昏浅色文字），可读性靠「内容层实底 + 高对比文字」：
+
+- **令牌**：`:root`（夜晚）、`[data-theme="light"]`（白天）、`[data-period="dusk"]`（黄昏晴天）各一套 `--chrome-bg/fg/border` 与 `--tool-record-bg/fg/muted/border/danger`；黄昏雨天/雷暴在该天气选择器里覆写成深色实底 + 浅色文字。
+- **执行记录**改用上述实底 token（不再透明底 + `--text-muted`）。
+- **工具栏控件**（`#toolbar .btn-ghost`、`#toolbar #model-select`、`#temporary-badge`）用实底色块；hover 用 `#toolbar #toolbar-right .btn-ghost:hover` 压过 animations.css 的 `#toolbar-right button:hover`。
+- **白天 + 动态背景的玻璃改浅色**：原来复用夜晚 `--main-overlay/--panel-overlay`（深底 + 深字 → 实测 1.0~2.7:1），现改为同透明度（0.55/0.82/0.18）的浅色玻璃。
+- **黄昏晴天输入区**用实底 `--chrome-bg` + 深色 `--chrome-fg`；雨天覆写回深底浅字并补浅色 placeholder。
+- **其它**：placeholder 统一 `--text-dim`；会话时间戳去掉 `opacity:0.75` 并用 `--text-dim`；黄昏侧栏加第二层 `0 0 7px` 深色阴影。
+- 回归：`node tests/frontend_theme_contrast.cjs`（白天/黄昏/夜晚 × 晴/雨共 6 组，≥4.5:1；测量前临时关闭 transition/animation 防中间帧）+ `python -m unittest tests.test_theme_contrast`。
 
 ## 上传文件回显（附件卡片）
 

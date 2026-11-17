@@ -45,6 +45,8 @@ tests/*
 !tests/test_updater.py
 !tests/test_generation_ready.py
 !tests/frontend_queue_ruler.cjs
+!tests/frontend_tool_style.cjs
+!tests/frontend_theme_contrast.cjs
 *_generated_*.png
 矩阵运算*.md
 newton_bisection.tex
@@ -72,3 +74,4 @@ __pycache__/
 app/static/_index.runtime.html
 
 nul
+

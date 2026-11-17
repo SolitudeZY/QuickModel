@@ -310,6 +310,33 @@ class CompactionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 _summarize_text({}, "history")
 
+    def test_summary_input_clips_tool_output_but_keeps_user_text(self):
+        messages = [
+            {"role": "system", "content": "stable"},
+            {"role": "user", "content": "需求：" + "u" * 5000},
+            {"role": "assistant", "content": "开始执行", "tool_calls": [{
+                "id": "c1", "type": "function",
+                "function": {"name": "read_file", "arguments": "a" * 20000},
+            }]},
+            {"role": "tool", "tool_call_id": "c1", "content": "t" * 20000},
+        ] + [{"role": "user", "content": str(i)} for i in range(15)]
+        with patch("app.advanced_tools._summarize_text", return_value="summary") as summary:
+            auto_compact(messages, {})
+        sent = "\n".join(call.args[1] for call in summary.call_args_list)
+        # 用户正文（需求）完整保留，工具输出与参数按上限裁剪，且明确标注省略字符数
+        self.assertIn("u" * 5000, sent)
+        self.assertIn("摘要时已省略", sent)
+        self.assertNotIn("t" * 4000, sent)
+        self.assertNotIn("a" * 4000, sent)
+
+    def test_summary_requests_carry_output_caps(self):
+        with patch("app.advanced_tools._summarize_text", return_value="summary") as summary:
+            auto_compact(self.messages, {})
+        caps = [call.kwargs.get("max_tokens") for call in summary.call_args_list]
+        self.assertTrue(caps)
+        self.assertTrue(all(cap for cap in caps))
+        self.assertLessEqual(max(caps), 1600)
+
 
 if __name__ == "__main__":
     unittest.main()

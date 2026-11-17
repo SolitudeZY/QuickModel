@@ -25,6 +25,31 @@ function _updateAllowlistCount(n) {
   const el = $('allowlist-count');
   if (el) el.textContent = `${n} 条`;
 }
+// ── 设置面板里的 API Key 显隐（眼睛按钮）──────────────────────────
+// 只临时切换 input.type，不写配置；关闭/保存设置后自动恢复隐藏，
+// 避免密钥长期明文留在屏幕上。所有带 type=password 的设置项都覆盖。
+let _secretsVisible = false;
+
+function _secretFields() {
+  return Array.from(document.querySelectorAll(
+    '#settings-modal input[type="password"], #settings-modal input[data-secret-field="1"]'
+  ));
+}
+
+function setSecretsVisible(visible) {
+  _secretsVisible = !!visible;
+  _secretFields().forEach(input => {
+    input.dataset.secretField = '1';
+    input.type = _secretsVisible ? 'text' : 'password';
+  });
+  const btn = $('btn-toggle-secrets');
+  if (btn) {
+    btn.textContent = _secretsVisible ? '🙈 隐藏密钥' : '👁 显示密钥';
+    btn.classList.toggle('active', _secretsVisible);
+  }
+}
+
+$('btn-toggle-secrets').addEventListener('click', () => setSecretsVisible(!_secretsVisible));
 // Update count when allowlist textarea changes
 $('allowlist-cmds').addEventListener('input', () => {
   const n = $('allowlist-cmds').value.split('\n').filter(s => s.trim()).length;
@@ -182,6 +207,7 @@ function closeSettingsWithoutSave() {
     state.config.model_configs = _modelConfigsBeforeOpen;
     _modelConfigsBeforeOpen = null;
   }
+  setSecretsVisible(false);
   $('settings-overlay').classList.add('hidden');
 }
 
@@ -672,6 +698,7 @@ async function openSettings() {
   // load current version
   const ver = await window.pywebview.api.get_app_version();
   $('update-current-ver').textContent = ver || '-';
+  setSecretsVisible(false);
   $('settings-overlay').classList.remove('hidden');
   if (document.querySelector('.tab-btn.active')?.dataset.tab === 'mcp') {
     _maybePromptExternalMcp();
@@ -716,6 +743,7 @@ function fillSettingsFields(cfg) {
     ? cfg.theme_mode : (cfg.theme === 'light' ? 'day' : cfg.theme === 'dark' ? 'night' : 'auto');
   $('ui-theme').value = themeMode;
   $('ui-fontsize').value = String(cfg.font_size || 14);
+  $('ui-tool-style').value = cfg.tool_call_style === 'record' ? 'record' : 'bubble';
   $('starfield-enabled').checked = cfg.starfield_enabled === true;
   $('starfield-mode').value = cfg.starfield_mode || 'twinkle';
   $('background-quality').value = ['eco', 'balanced', 'high'].includes(cfg.background_quality)
@@ -790,6 +818,7 @@ async function saveSettings() {
   state.config.theme_mode = $('ui-theme').value;
   state.config.theme = state.config.theme_mode === 'night' ? 'dark' : 'light';
   state.config.font_size = parseInt($('ui-fontsize').value) || 14;
+  state.config.tool_call_style = $('ui-tool-style').value === 'record' ? 'record' : 'bubble';
   state.config.starfield_enabled = $('starfield-enabled').checked;
   state.config.starfield_mode = $('starfield-mode').value;
   state.config.background_quality = $('background-quality').value;
@@ -805,6 +834,7 @@ async function saveSettings() {
   state.config.github_token = $('github-token').value.trim();
   applyTheme(state.config.theme_mode);
   applyFontSize(state.config.font_size);
+  applyToolCallStyle(state.config.tool_call_style);
   if (typeof applyStarfieldSettings === 'function') applyStarfieldSettings(state.config);
   if (typeof startWeatherBackground === 'function') startWeatherBackground();
   const previousMcpServers = state.config.mcp_servers || [];
@@ -817,6 +847,7 @@ async function saveSettings() {
   }
   _modelConfigsBeforeOpen = null;
   populateModelSelect();
+  setSecretsVisible(false);
   $('settings-overlay').classList.add('hidden');
 }
 

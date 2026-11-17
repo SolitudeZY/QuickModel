@@ -11,6 +11,7 @@ window.addEventListener('pywebviewready', async () => {
   state.config = await window.pywebview.api.get_config();
   applyTheme(state.config.theme_mode || state.config.theme || 'auto');
   applyFontSize(state.config.font_size || 14);
+  applyToolCallStyle(state.config.tool_call_style);
   if (typeof applyStarfieldSettings === 'function') applyStarfieldSettings(state.config);
   startWeatherBackground();
   populateModelSelect();
@@ -261,6 +262,17 @@ window.addEventListener('focus', () => {
 });
 function applyFontSize(size) {
   document.documentElement.style.setProperty('--font-size', size + 'px');
+}
+
+// 工具调用的两种展示样式（设置 → 外观 → 工具调用展示）：
+//   bubble：现有气泡卡片；record：DeepSeek harness 风格的紧凑执行记录。
+// 只切换 body 上的 data 属性，具体外观全在 style.css 的 body[data-tool-style=record] 里，
+// DOM 结构（tool-header / tool-body）两种样式共用，避免出现两套渲染逻辑。
+function applyToolCallStyle(style) {
+  const value = style === 'record' ? 'record' : 'bubble';
+  document.body.dataset.toolStyle = value;
+  const select = $('ui-tool-style');
+  if (select) select.value = value;
 }
 
 // ── Model select ──────────────────────────────────────────────────
@@ -1469,6 +1481,7 @@ function addToolCallBubble(toolName, args) {
       <span class="tool-icon">${icon}</span>
       <span class="tool-name">${escapeHtml(toolName)}</span>
       <span class="tool-args-preview">${escapeHtml(JSON.stringify(args).slice(0,80))}${JSON.stringify(args).length>80?'…':''}</span>
+      <span class="tool-status">运行中</span>
       <span class="tool-chevron">▶</span>
     </div>
     <div class="tool-body">
@@ -1505,14 +1518,19 @@ function addToolResultBubble(toolName, result) {
           _hydrateImgThumbs(resultEl);
           // 默认展开，让缩略图可见
           bubbles[i].classList.add('tool-expanded');
+          _markToolStatus(bubbles[i], result);
+          _appendLocateActions(bubbles[i], result);
           return;
         }
-        const preview = result.replace(/\n/g,' ').trim().slice(0, 200) + (result.length > 200 ? '…' : '');
-        resultEl.textContent = preview;
-        // Add file link for write/patch tools
-        if (['write_file', 'apply_patch'].includes(toolName)) {
-          _appendFileLinks(bubbles[i], result);
-        }
+        // 展开区显示完整结果（CSS 已限高 280px 内部滚动）；超长结果截断并注明，
+        // 避免一个 10 万字符的工具输出把 DOM 撑爆。
+        const fullText = result.length > 20000
+          ? `${result.slice(0, 20000)}\n…（结果过长已截断，共 ${result.length} 字符）`
+          : result;
+        resultEl.textContent = fullText;
+        resultEl.dataset.truncated = result.length > 20000 ? '1' : '0';
+        _markToolStatus(bubbles[i], result);
+        _appendLocateActions(bubbles[i], result);
         return;
       }
     }
@@ -1531,44 +1549,122 @@ function addToolResultBubble(toolName, result) {
     rc.innerHTML = buildUserContent(result);
     chatMessages.appendChild(div);
     _hydrateImgThumbs(rc);
+    _markToolStatus(div, result);
+    _appendLocateActions(div, result);
     scrollToBottom();
     return;
   }
-  div.innerHTML = `<div class="tool-header"><span class="tool-icon">${icon}</span><span class="tool-name">${escapeHtml(toolName)}</span></div>`;
+  div.innerHTML = `<div class="tool-header" onclick="this.parentElement.classList.toggle('tool-expanded')"><span class="tool-icon">${icon}</span><span class="tool-name">${escapeHtml(toolName)}</span><span class="tool-status">完成</span><span class="tool-chevron">▶</span></div>`
+    + `<div class="tool-body"><div class="tool-result-content">${escapeHtml((result || '').slice(0, 4000))}</div></div>`;
   chatMessages.appendChild(div);
+  _appendLocateActions(div, result || '');
   scrollToBottom();
 }
 
-function _appendFileLinks(bubble, result) {
-  // Extract file paths from write_file/apply_patch results (lines starting with ✅)
-  const pathRegex = /[A-Z]:\\[^\n]+|\/[^\n\s]+/g;
+// ── 工具结果：状态标记 + 文件定位 ─────────────────────────────────
+// 任何工具结果（生图／写文件／命令输出…）只要指向磁盘上的文件，就在「展开后的」
+// tool-body 底部列出一排定位按钮；收起时不占版面。气泡样式与执行记录样式共用。
+// 路径来源：① 附件/图片标记里的 路径:；② 正文里形如 D:\... 或 /... 且带扩展名的绝对路径。
+const _TOOL_MARKER_RE = /\[(?:图片|附件): ([^\]\n]*?)(?: 路径: ([^\]\n]*))?\]/g;
+const _TOOL_ABS_PATH_RE = /(?:file:\/\/\/?)?(?:[A-Za-z]:[\\/]|\/)[^\s"'<>|?*]+/g;
+const _TOOL_PATH_TAIL_RE = /[),.;:，。；：、）】》\]>\u3002\uff09]+$/;
+
+function _isFailureResult(result) {
+  const head = String(result || '').trim().slice(0, 40);
+  return /^(?:错误|失败|异常|❌|⛔|Error|ERROR|Traceback)/.test(head);
+}
+
+function _normalizeToolPath(raw) {
+  let value = String(raw || '').trim().replace(/^file:\/\/\/?/, '');
+  value = value.replace(/^["'`]+|["'`]+$/g, '');
+  value = value.replace(_TOOL_PATH_TAIL_RE, '');
+  return value;
+}
+
+function _markerFilePaths(result) {
   const paths = [];
-  for (const line of result.split('\n')) {
-    if (line.includes('✅') || line.includes('📁')) {
-      const matches = line.match(pathRegex);
-      if (matches) {
-        for (const m of matches) {
-          if (line.includes('✅') && !paths.includes(m)) paths.push(m);
-        }
-      }
-    }
+  let match;
+  _TOOL_MARKER_RE.lastIndex = 0;
+  while ((match = _TOOL_MARKER_RE.exec(String(result || ''))) !== null) {
+    const path = _normalizeToolPath(match[2] || '');
+    if (path && !paths.includes(path)) paths.push(path);
   }
-  if (paths.length === 0) return;
-  const linkDiv = document.createElement('div');
-  linkDiv.className = 'tool-file-links';
-  paths.forEach(fp => {
-    const a = document.createElement('span');
-    a.className = 'file-link';
-    a.textContent = `📂 ${fp.split(/[/\\]/).pop()}`;
-    a.title = fp;
-    a.addEventListener('click', e => {
+  return paths;
+}
+
+function _scannedFilePaths(result) {
+  const paths = [];
+  const text = String(result || '');
+  let match;
+  _TOOL_ABS_PATH_RE.lastIndex = 0;
+  while ((match = _TOOL_ABS_PATH_RE.exec(text)) !== null) {
+    const path = _normalizeToolPath(match[0]);
+    if (!path || path.length > 512) continue;
+    // 只认「像文件」的路径（末段带扩展名），避免把命令里的 /usr/bin 之类当文件
+    if (!/\/[^/\\?*|<>]+\.[A-Za-z0-9]{1,8}$/.test(path)) continue;
+    if (!paths.includes(path)) paths.push(path);
+    if (paths.length >= 24) break;
+  }
+  return paths;
+}
+
+function _markToolStatus(bubble, result) {
+  const status = bubble.querySelector('.tool-status');
+  if (!status) return;
+  const failed = _isFailureResult(result);
+  status.textContent = failed ? '失败' : '完成';
+  status.classList.toggle('tool-status-failed', failed);
+  bubble.classList.toggle('tool-failed', failed);
+}
+
+// 在 tool-body 内追加定位按钮（body 收起时不可见，天然满足「只有展开才显示」）
+async function _appendLocateActions(bubble, result) {
+  const body = bubble.querySelector('.tool-body');
+  if (!body) return;
+  if (body.querySelector('.tool-file-actions')) return;
+  const markerPaths = _markerFilePaths(result);
+  const candidates = [...new Set([...markerPaths, ..._scannedFilePaths(result)])].slice(0, 24);
+  if (!candidates.length) return;
+  let existing = [];
+  try {
+    const res = await window.pywebview.api.paths_exist(candidates);
+    if (res && Array.isArray(res.existing)) existing = res.existing;
+  } catch (e) {
+    // 后端不可用（例如纯浏览器调试）时退回标记里的路径
+    existing = markerPaths;
+  }
+  // 标记路径与后端返回路径可能只差斜杠方向，按归一化 key 去重后再渲染
+  const seen = new Set();
+  const paths = [];
+  [...markerPaths, ...existing].forEach(fp => {
+    const key = String(fp).replace(/\\/g, '/').toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    paths.push(fp);
+  });
+  const limited = paths.slice(0, 8);
+  if (!limited.length) return;
+  if (!bubble.querySelector('.tool-body')) return;
+  if (body.querySelector('.tool-file-actions')) return;
+  const row = document.createElement('div');
+  row.className = 'tool-file-actions';
+  const label = document.createElement('span');
+  label.className = 'tool-file-actions-label';
+  label.textContent = '定位文件';
+  row.appendChild(label);
+  limited.forEach(fp => {
+    const chip = document.createElement('span');
+    chip.className = 'file-link';
+    chip.textContent = fp.split(/[/\\]/).pop() || fp;
+    chip.title = `在文件夹中定位：${fp}`;
+    chip.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       window.pywebview.api.open_file_location(fp);
     });
-    linkDiv.appendChild(a);
+    row.appendChild(chip);
   });
-  bubble.appendChild(linkDiv);
+  body.appendChild(row);
 }
 
 function addErrorBubble(msg) {

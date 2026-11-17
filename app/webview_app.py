@@ -796,6 +796,27 @@ $appId = '{{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}}\\WindowsPowerShell\\v1.0\\pow
                 if parent.exists():
                     _sp.Popen(['explorer', str(parent)])
 
+    def paths_exist(self, paths: list) -> dict:
+        """过滤出真实存在的路径，供工具结果里的「定位文件」按钮使用。
+
+        前端从工具结果文本里扫到候选路径后调用本方法；只保留磁盘上确实存在的，
+        避免把命令输出里出现的假路径渲染成可点击按钮（点击会退化成打开父目录）。
+        """
+        existing, dirs = [], []
+        for raw in (paths or [])[:64]:
+            text = str(raw or '').strip()
+            if not text:
+                continue
+            try:
+                p = Path(text)
+                if p.exists():
+                    existing.append(str(p))
+                    if p.is_dir():
+                        dirs.append(str(p))
+            except (OSError, ValueError):
+                continue
+        return {'existing': existing, 'dirs': dirs}
+
     def get_file_diff(self, path: str, conv_id: str = '') -> dict:
         """返回某文件「首次改动前 baseline → 当前磁盘内容」的累计 diff，供前端渲染绿红视图。
 

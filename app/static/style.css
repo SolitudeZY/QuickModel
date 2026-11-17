@@ -23,9 +23,20 @@
   --main-overlay: rgba(12, 14, 27, 0.62);
   --panel-overlay: rgba(18, 20, 34, 0.78);
   --chat-overlay: rgba(9, 11, 22, 0.14);
+  /* 内容层“实底”配色：不受动态背景/玻璃透明度影响，保证文字对比度。
+     工具栏控件、工具执行记录、折叠条与状态用它，而不是半透明 --surface。 */
+  --chrome-bg: #20263c;
+  --chrome-fg: #e7ecff;
+  --chrome-border: #47506f;
+  --tool-record-bg: #1b2133;
+  --tool-record-fg: #e7ecff;
+  --tool-record-muted: #b7c0df;
+  --tool-record-border: #3d4664;
+  --tool-record-danger: #ff9aa9;
   --sidebar-w: 220px;
   --font-size: 14px;
   --radius: 8px;
+  --mono: 'SF Mono', Menlo, Consolas, 'Cascadia Mono', 'Courier New', monospace;
 }
 
 [data-theme="light"] {
@@ -49,6 +60,14 @@
   --danger-hover: #e74c3c;
   --hover: rgba(0, 0, 0, 0.04);
   --glow-accent: rgba(46, 111, 149, 0.12);
+  --chrome-bg: #ffffff;
+  --chrome-fg: #1b2a33;
+  --chrome-border: #b9c7cd;
+  --tool-record-bg: #ffffff;
+  --tool-record-fg: #1b2a33;
+  --tool-record-muted: #44555e;
+  --tool-record-border: #c6d3d8;
+  --tool-record-danger: #b3261e;
 }
 
 [data-period="dusk"] {
@@ -70,6 +89,14 @@
   --code-fg: #392b29;
   --hover: rgba(106, 64, 49, 0.06);
   --glow-accent: rgba(179, 95, 77, 0.14);
+  --chrome-bg: #fff6ef;
+  --chrome-fg: #33211f;
+  --chrome-border: #dcbfb1;
+  --tool-record-bg: #fff8f1;
+  --tool-record-fg: #33211f;
+  --tool-record-muted: #5b423c;
+  --tool-record-border: #e0c7b9;
+  --tool-record-danger: #a8231c;
 }
 
 /* ── Reset ── */
@@ -237,7 +264,7 @@ pre, code,
 #conv-list li .conv-snippet { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; opacity: 0.8; }
 #conv-list li .conv-title-wrap { display: flex; flex-direction: column; overflow: hidden; }
 #conv-list li .conv-title-wrap .conv-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#conv-list li .conv-title-wrap .conv-time { font-size: 10px; color: var(--text-muted); opacity: 0.75; margin-top: 1px; }
+#conv-list li .conv-title-wrap .conv-time { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
 #conv-list li.search-content-match { border-left: 2px solid var(--accent); }
 #conv-list li.manage-selecting { padding-left: 7px; }
 #conv-list li.manage-selecting:hover { transform: none; }
@@ -448,17 +475,19 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
 [data-theme="light"][data-starfield="on"] body {
   background: var(--bg);
 }
+/* 白天主题配动态背景时，玻璃必须是“浅色玻璃”：原来是深色 --panel-overlay，
+   深底 + 浅色主题的深色文字 → 工具栏/标题几乎不可见（实测对比度 1.0:1）。 */
 [data-theme="light"][data-starfield="on"] #main {
-  background: var(--main-overlay);
+  background: rgba(247, 251, 252, 0.55);
 }
 [data-theme="light"][data-starfield="on"] #sidebar,
 [data-theme="light"][data-starfield="on"] #toolbar,
 [data-theme="light"][data-starfield="on"] #input-area {
-  background: var(--panel-overlay);
+  background: rgba(250, 253, 254, 0.82);
   backdrop-filter: blur(8px);
 }
 [data-theme="light"][data-starfield="on"] #chat-area {
-  background: var(--chat-overlay);
+  background: rgba(252, 254, 255, 0.18);
 }
 
 /* Keep the city visible through thin warm glass. Sidebar text is scoped separately. */
@@ -476,15 +505,17 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
 }
 [data-period="dusk"][data-starfield="on"] #search-input,
 [data-period="dusk"][data-starfield="on"] #msg-input {
-  background: rgba(61, 38, 32, 0.10);
-  color: #fff8f4;
+  background: var(--chrome-bg);
+  border-color: var(--chrome-border);
+  /* 晴天黄昏的玻璃是浅暖色，输入区用实底浅色 + 深色文字，避免白字糊在亮背景上 */
+  color: var(--chrome-fg);
 }
 [data-period="dusk"][data-starfield="on"] #msg-input {
-  caret-color: #fff8f4;
+  caret-color: var(--chrome-fg);
 }
 [data-period="dusk"][data-starfield="on"] #search-input::placeholder,
 [data-period="dusk"][data-starfield="on"] #msg-input::placeholder {
-  color: #f5dcd4;
+  color: #6b4f47;
   opacity: 1;
 }
 [data-period="dusk"][data-starfield="on"][data-weather="rain"],
@@ -502,6 +533,15 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
   --code-bg: rgba(24, 15, 19, 0.76);
   --code-fg: #fff8f4;
   --hover: rgba(255, 224, 216, 0.10);
+  /* 雨天/雷暴的黄昏背景更暗，内容层换成深色实底 + 浅色文字 */
+  --chrome-bg: #2c1f24;
+  --chrome-fg: #fff8f4;
+  --chrome-border: #6b4a4a;
+  --tool-record-bg: #2e2126;
+  --tool-record-fg: #fff8f4;
+  --tool-record-muted: #e8c9c1;
+  --tool-record-border: #5f4242;
+  --tool-record-danger: #ff9aa6;
 }
 
 /* Rain needs sharper transparency than the normal frosted background. */
@@ -563,6 +603,14 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
   background: rgba(24, 15, 19, 0.34);
   color: #fff8f4;
 }
+/* 雨天黄昏的输入框是深色底，占位符也要回到浅色，否则沿用晴天的深色占位符看不清 */
+[data-period="dusk"][data-starfield="on"][data-weather="rain"] #search-input::placeholder,
+[data-period="dusk"][data-starfield="on"][data-weather="rain"] #msg-input::placeholder,
+[data-period="dusk"][data-starfield="on"][data-weather="thunder"] #search-input::placeholder,
+[data-period="dusk"][data-starfield="on"][data-weather="thunder"] #msg-input::placeholder {
+  color: #f5dcd4;
+  opacity: 1;
+}
 
 #tab-background output {
   float: right;
@@ -601,6 +649,31 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
 }
 #conv-title { flex: 1; font-weight: 600; font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #toolbar-right { display: flex; gap: 6px; }
+
+/* ── 工具栏控件：实底高对比（不受动态背景/玻璃透明度影响）──
+   动态背景下的工具栏一直是半透明玻璃，浅色主题/黄昏晴天时深色文字会糊在
+   亮色天空上（实测 2.6:1、1.0:1）。控件自身用实底色块保证可读。 */
+#toolbar .btn-ghost,
+#toolbar #model-select {
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border-color: var(--chrome-border);
+}
+#toolbar .btn-ghost:hover,
+#toolbar #toolbar-right .btn-ghost:hover {
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  box-shadow: none;
+  filter: brightness(1.08);
+}
+#toolbar #model-select option { background: var(--bg2); color: var(--text); }
+#toolbar #temporary-badge {
+  background: var(--chrome-bg);
+  color: var(--chrome-fg);
+  border: 1px solid var(--chrome-border);
+  border-radius: var(--radius);
+  padding: 2px 8px;
+}
 
 /* ── Content area (chat + todo side panel) ── */
 #content-area {
@@ -748,9 +821,81 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
 .tool-pre { font-size: 11px; white-space: pre-wrap; margin: 0; color: var(--text-dim); }
 .tool-result-content { font-size: 11px; color: var(--text-dim); white-space: pre-wrap; word-break: break-all; }
 
+/* ── 工具调用状态 + 结果里的文件定位按钮（两种展示样式共用）── */
+.tool-status { display: none; font-size: 10px; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; }
+.tool-status-failed { color: var(--danger); }
+.tool-file-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border);
+}
+.tool-file-actions-label { font-size: 10px; color: var(--text-dim); }
+.tool-file-actions .file-link { font-size: 11px; padding: 1px 8px; }
+.tool-file-actions .file-link::before { content: '📂 '; }
+
+/* ── 工具调用展示样式二：执行记录（DeepSeek harness 风格）──────────
+   只切换外观，DOM 仍是 tool-header / tool-body；由设置里的
+   「工具调用展示」写入 body[data-tool-style]。 */
+body[data-tool-style="record"] #chat-messages .bubble-tool-call {
+  background: var(--tool-record-bg);
+  border: 1px solid var(--tool-record-border);
+  border-radius: 6px;
+  color: var(--tool-record-fg);
+  overflow: visible;
+  font-size: 12px;
+}
+body[data-tool-style="record"] #chat-messages .bubble-tool-call .tool-header {
+  padding: 3px 8px;
+  gap: 8px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+body[data-tool-style="record"] #chat-messages .bubble-tool-call .tool-header:hover {
+  background: var(--hover);
+  padding-left: 8px;
+}
+body[data-tool-style="record"] .tool-icon { font-size: 12px; opacity: 0.85; }
+body[data-tool-style="record"] .tool-name {
+  font-weight: 600; color: var(--tool-record-fg); font-family: var(--mono); letter-spacing: 0.01em;
+}
+body[data-tool-style="record"] .tool-args-preview {
+  font-family: var(--mono); font-size: 11px; color: var(--tool-record-muted);
+  background: color-mix(in srgb, var(--bg3) 45%, transparent);
+  border-radius: 4px; padding: 0 6px; line-height: 1.7;
+}
+body[data-tool-style="record"] .tool-status { display: inline-flex; color: var(--tool-record-muted); }
+body[data-tool-style="record"] .tool-status-failed { color: var(--tool-record-danger); }
+body[data-tool-style="record"] .bubble-tool-call.tool-expanded {
+  background: var(--tool-record-bg);
+  border-color: var(--tool-record-border);
+}
+body[data-tool-style="record"] .bubble-tool-call.tool-failed.tool-expanded { border-color: var(--tool-record-danger); }
+body[data-tool-style="record"] .bubble-tool-call.tool-expanded .tool-header:hover { background: transparent; }
+body[data-tool-style="record"] .tool-body {
+  border-top: none;
+  border-left: 2px solid var(--tool-record-border);
+  margin: 2px 8px 6px 24px;
+  padding: 2px 10px 6px 10px;
+}
+body[data-tool-style="record"] .tool-body .tool-pre,
+body[data-tool-style="record"] .tool-body .tool-result-content {
+  background: color-mix(in srgb, var(--code-bg) 65%, transparent);
+  border-radius: 4px; padding: 4px 8px; font-family: var(--mono); max-height: 320px;
+}
+body[data-tool-style="record"] .tool-section-label { font-size: 9px; letter-spacing: 0.08em; }
+body[data-tool-style="record"] .tool-fold {
+  border-style: solid; border-color: var(--tool-record-border); background: var(--tool-record-bg);
+  color: var(--tool-record-fg);
+}
+body[data-tool-style="record"] .tool-fold-header { color: var(--tool-record-muted); }
+body[data-tool-style="record"] .tool-fold-body { gap: 2px; padding-left: 2px; }
+
+/* ── 设置：显示/隐藏密钥 ── */
+.secret-toggle-btn { margin-left: auto; margin-right: 10px; font-size: 12px; padding: 3px 10px; }
+.secret-toggle-btn.active { color: var(--accent); border-color: var(--accent); }
+
 /* ── 连续工具调用折叠块 ── */
 .tool-fold { margin: 4px 0; border: 1px dashed var(--border); border-radius: var(--radius); background: var(--tool-bubble); overflow: hidden; }
-.tool-fold-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; user-select: none; font-size: 11px; color: var(--text-muted); }
+.tool-fold-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer; user-select: none; font-size: 11px; color: var(--text-dim); }
 .tool-fold-header:hover { background: var(--glow-accent); color: var(--text); }
 .tool-fold-chevron { font-size: 10px; transition: transform .2s; }
 .tool-fold:not(.collapsed) .tool-fold-chevron { transform: rotate(90deg); }
@@ -1045,6 +1190,9 @@ mark.search-highlight { background: rgba(250, 204, 21, 0.35); color: inherit; bo
   transition: border-color 0.4s ease, box-shadow 0.4s ease, background 0.3s ease;
 }
 #msg-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--glow-accent), 0 0 20px var(--glow-accent); background: color-mix(in srgb, var(--bg3) 90%, var(--accent) 10%); }
+/* 占位提示用 --text-dim：默认 UA 灰色在深色/浅色主题都偏淡（实测 2.6~3.4:1） */
+#msg-input::placeholder,
+#search-input::placeholder { color: var(--text-dim); opacity: 1; }
 #input-btns { display: flex; flex-direction: column; gap: 4px; }
 #msg-input { min-width: 0; }
 #btn-send-now { font-size: 12px; padding: 5px 8px; }
@@ -1669,3 +1817,13 @@ body.drag-over #input-area { border-top-color: var(--accent); background: var(--
 .diff-hunk { background: var(--bg3); color: var(--accent); }
 .diff-hunk .diff-text { padding-left: 8px; }
 #plan-overlay .modal { max-width: 600px; }
+
+/* ── 黄昏 + 动态背景：侧栏文字在亮色天空/建筑上靠双层深色描边兜底 ──
+   颜色仍按既有设计保持浅色（见 test_theme_contrast.py），这里只加一层
+   更宽的深色阴影，避免局部亮色背景上文字"融进背景"。 */
+[data-period="dusk"][data-starfield="on"] #conv-list li,
+[data-period="dusk"][data-starfield="on"] #conv-list li .conv-title-wrap .conv-time,
+[data-period="dusk"][data-starfield="on"] #conv-list li .conv-snippet,
+[data-period="dusk"][data-starfield="on"] .conv-group-header {
+  text-shadow: 0 1px 2px rgba(20, 10, 14, 0.88), 0 0 7px rgba(20, 10, 14, 0.72);
+}

@@ -178,6 +178,8 @@ def normalize_config(config: dict) -> dict:
         refresh_minutes = 30
     normalized["weather_refresh_minutes"] = max(15, min(refresh_minutes, 180))
     normalized["weather_enabled"] = normalized.get("weather_enabled") is not False
+    tool_style = str(normalized.get("tool_call_style", "bubble") or "").strip().lower()
+    normalized["tool_call_style"] = tool_style if tool_style in {"bubble", "record"} else "bubble"
     configs = normalized.get("model_configs")
     if not isinstance(configs, list):
         configs = []
@@ -287,6 +289,7 @@ DEFAULT_CONFIG = {
     "weather_refraction": 65,
     "weather_refresh_minutes": 30,
     "sidebar_width": 220,
+    "tool_call_style": "bubble",   # bubble（气泡卡片）| record（紧凑执行记录）
     "vision_api_key": "",
     "vision_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "vision_model": "qwen-vl-max",

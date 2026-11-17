@@ -214,6 +214,7 @@
   <div id="settings-modal" class="modal">
     <div class="modal-header">
       <h2>设置</h2>
+      <button class="btn-ghost secret-toggle-btn" id="btn-toggle-secrets" type="button" title="临时显示设置里所有 API Key（关闭设置后自动隐藏）">👁 显示密钥</button>
       <button class="btn-close" id="btn-settings-close">✕</button>
     </div>
     <div class="modal-tabs">
@@ -577,6 +578,13 @@
             <option value="16">16</option>
           </select>
         </label>
+        <label>工具调用展示
+          <select id="ui-tool-style">
+            <option value="bubble">气泡卡片（参数与结果折叠在气泡里）</option>
+            <option value="record">执行记录（紧凑单行，适合大量调用）</option>
+          </select>
+        </label>
+        <p class="hint">执行记录样式下每次工具调用只占一行，点击展开参数与结果；展开区底部会列出本次生成的文件，可直接在文件夹中定位。</p>
         <label class="checkbox-label"><input type="checkbox" id="starfield-enabled"> 启用背景动态效果</label>
         <label>背景模式
           <select id="starfield-mode">

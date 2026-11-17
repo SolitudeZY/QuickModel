@@ -223,8 +223,61 @@ def estimate_tokens(messages: list) -> int:
     return estimate_message_tokens(messages)
 
 
+# 压缩参数（并行 + 上限）：
+#   CHUNK_CHARS          每块喂给摘要模型的字符上限
+#   SUMMARY_OUTPUT_TOKENS 单块摘要输出上限（不设上限时模型爱写长文，单块能耗 60s+）
+#   MAX_PARALLEL_SUMMARIES 并行摘要路数（按块顺序合并，UI 进度仍单线程上报）
+CHUNK_CHARS = 60000
+SUMMARY_OUTPUT_TOKENS = 1200
+MERGE_OUTPUT_TOKENS = 1600
+SUMMARY_REQUEST_TIMEOUT = 60.0
+MERGE_REQUEST_TIMEOUT = 45.0
+MAX_PARALLEL_SUMMARIES = 4
+
+# 摘要输入裁剪上限：工具输出/参数通常是历史体积的主要来源，全文喂给摘要模型
+# 只会拖慢压缩、几乎不增加可继续工作的信息；完整原文另有 transcript 存档。
+# ⚠ 用户与助手正文不裁剪——需求、约束和决策都写在正文里，丢一句就可能失忆。
+SUMMARY_TOOL_CHARS = 3000
+SUMMARY_ARGUMENT_CHARS = 2000
+
+
+def _clip_for_summary(text, limit: int):
+    if not isinstance(text, str) or len(text) <= limit:
+        return text
+    head = max(1, int(limit * 0.7))
+    tail = max(0, limit - head)
+    omitted = len(text) - head - tail
+    suffix = f"\n…[摘要时已省略 {omitted} 字符]…\n" + (text[-tail:] if tail else "")
+    return text[:head] + suffix
+
+
+def _summary_safe_message(message: dict) -> dict:
+    """去掉图片编码并裁剪超长工具输出/参数，供压缩摘要使用。"""
+    from app.multimodal import summary_safe
+    safe = summary_safe(message)
+    if not isinstance(safe, dict):
+        return safe
+    if safe.get("role") == "tool" and isinstance(safe.get("content"), str):
+        safe["content"] = _clip_for_summary(safe["content"], SUMMARY_TOOL_CHARS)
+    calls = safe.get("tool_calls")
+    if isinstance(calls, list):
+        clipped = []
+        for call in calls:
+            if isinstance(call, dict):
+                call = dict(call)
+                fn = call.get("function")
+                if isinstance(fn, dict) and isinstance(fn.get("arguments"), str):
+                    fn = dict(fn)
+                    fn["arguments"] = _clip_for_summary(fn["arguments"], SUMMARY_ARGUMENT_CHARS)
+                    call["function"] = fn
+            clipped.append(call)
+        safe["tool_calls"] = clipped
+    return safe
+
+
 def _summarize_text(model_config: dict, text: str, timeout_seconds: float = 120,
-                    stop_event: threading.Event = None) -> str:
+                    stop_event: threading.Event = None,
+                    max_tokens: int = None) -> str:
     """调模型对一段对话文本做结构化摘要。失败抛异常由调用方处理。"""
     prompt = (
         "你在为一个『AI 编程助手』压缩历史对话，供它之后无缝继续工作。"
@@ -249,6 +302,7 @@ def _summarize_text(model_config: dict, text: str, timeout_seconds: float = 120,
                 model_config,
                 [{"role": "user", "content": prompt}],
                 stop_event=request_stop,
+                max_tokens=max_tokens,
             )
             if not result or not result.strip():
                 raise ValueError("摘要模型返回空内容")
@@ -293,7 +347,6 @@ def auto_compact(messages: list, model_config: dict,
     - RECENT_KEEP 提高；可用更便宜的模型（summary_client/summary_model）做摘要。
     """
     RECENT_KEEP = 15   # keep at most the last N messages verbatim
-    CHUNK_CHARS = 60000  # 每块喂给摘要模型的字符上限
 
     def report(state: str, detail: str = ""):
         if on_status:
@@ -351,59 +404,104 @@ def auto_compact(messages: list, model_config: dict,
     except OSError:
         path = None
 
-    # Bound every chunk, including a single oversized tool result. Preserve
-    # all text while keeping image encodings out of summary requests.
-    from app.multimodal import summary_safe
-    middle_text = json.dumps([summary_safe(m) for m in middle], default=str, ensure_ascii=False)
+    # 摘要输入：去掉图片编码 + 裁剪超长工具输出/参数（完整原文另有 transcript 存档）。
+    # 中段体积的 80% 以上通常是工具输出与 write_file 参数，全文喂给摘要模型只会拖慢
+    # 压缩速度，几乎不增加可继续工作的信息。
+    middle_text = json.dumps([_summary_safe_message(m) for m in middle],
+                             default=str, ensure_ascii=False)
     chunks = [middle_text[i:i + CHUNK_CHARS]
               for i in range(0, len(middle_text), CHUNK_CHARS)]
 
-    def summarize(text):
+    fallback_lock = threading.Lock()
+    fallback_state = {"used": False}
+
+    def summarize_request(text: str, max_tokens: int, timeout_cap: float) -> str:
+        """一次摘要请求（含便宜模型失败后回退主模型）。"""
         nonlocal summary_config
         if stop_event is not None and stop_event.is_set():
             raise InterruptedError("用户已停止上下文压缩")
+        config = summary_config
+        timeout = min(timeout_cap, max(0.01, deadline - time.monotonic()))
         try:
             return _summarize_text(
-                summary_config, text,
-                timeout_seconds=min(120, max(0.01, deadline - time.monotonic())),
+                config, text,
+                timeout_seconds=timeout,
                 stop_event=stop_event,
+                max_tokens=max_tokens,
             )
         except Exception:
-            if (summary_config == model_config or time.monotonic() >= deadline
+            if (config == model_config or time.monotonic() >= deadline
                     or (stop_event is not None and stop_event.is_set())):
                 raise
-            report("fallback", "摘要模型不可用，切换当前主模型继续压缩")
-            summary_config = model_config
+            with fallback_lock:
+                if summary_config == config:
+                    summary_config = model_config
+                    fallback_state["used"] = True
             return _summarize_text(
-                summary_config, text,
-                timeout_seconds=min(120, max(0.01, deadline - time.monotonic())),
+                model_config, text,
+                timeout_seconds=min(timeout_cap, max(0.01, deadline - time.monotonic())),
                 stop_event=stop_event,
+                max_tokens=max_tokens,
             )
 
+    def summarize(text: str) -> str:
+        return summarize_request(text, SUMMARY_OUTPUT_TOKENS, SUMMARY_REQUEST_TIMEOUT)
+
+    def summarize_chunks(deadline_at: float) -> list:
+        """并行摘要各块，按原始顺序返回；进度只从协调线程上报，避免并发调用 UI。"""
+        if len(chunks) == 1:
+            return [summarize(chunks[0])]
+        if deadline_at - time.monotonic() <= 0:
+            raise TimeoutError("上下文摘要超时")
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        results = [None] * len(chunks)
+        with ThreadPoolExecutor(
+            max_workers=min(MAX_PARALLEL_SUMMARIES, len(chunks)),
+            thread_name_prefix="QuickModel-Compact",
+        ) as pool:
+            futures = {pool.submit(summarize, chunk): idx for idx, chunk in enumerate(chunks)}
+            done = 0
+            try:
+                for future in as_completed(futures):
+                    results[futures[future]] = future.result()
+                    done += 1
+                    report("progress", f"正在压缩历史 {done}/{len(chunks)} 块…")
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
+        return results
+
     try:
-        # Default budget scales with work; explicit timeouts remain total limits.
-        total_budget = (120 * (len(chunks) + (len(chunks) > 1))
+        # 并行压缩后总预算按「波次」而不是按请求数增长；显式 timeout 仍是总上限。
+        waves = max(1, (len(chunks) + MAX_PARALLEL_SUMMARIES - 1) // MAX_PARALLEL_SUMMARIES)
+        total_budget = (120.0 * (waves + 2)
                         if timeout_seconds is None else max(0.01, float(timeout_seconds)))
         deadline = time.monotonic() + total_budget
-        part_summaries = []
-        for i, ch in enumerate(chunks):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(f"上下文摘要超过 {total_budget:g} 秒")
-            report("progress", f"正在压缩第 {i + 1}/{len(chunks)} 块历史…")
-            part_summaries.append(summarize(ch))
+        report("progress", f"正在压缩历史（{len(chunks)} 块，最多 {MAX_PARALLEL_SUMMARIES} 路并行）…")
+        part_summaries = summarize_chunks(deadline)
+
+        def report_fallback_once():
+            if fallback_state["used"] and not fallback_state.get("reported"):
+                fallback_state["reported"] = True
+                report("fallback", "摘要模型不可用，已切换当前主模型继续压缩")
+
+        report_fallback_once()
         if len(part_summaries) == 1:
             summary = part_summaries[0]
         else:
-            # 多块：合并各块摘要为一份总摘要
+            # 多块：合并各块摘要为一份总摘要（只合并摘要，体积很小）
             merged = "\n\n".join(f"[片段{i+1}]\n{s}" for i, s in enumerate(part_summaries))
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(f"上下文摘要超过 {total_budget:g} 秒")
             report("progress", "正在合并历史摘要…")
-            summary = summarize(
-                f"以下是同一段对话按时间顺序分块得到的多份摘要，请合并为一份连贯、不丢信息的结构化摘要：\n{merged}",
+            summary = summarize_request(
+                "以下是同一段对话按时间顺序分块得到的多份摘要，请合并为一份连贯、不丢信息的结构化摘要：\n" + merged,
+                MERGE_OUTPUT_TOKENS,
+                MERGE_REQUEST_TIMEOUT,
             )
+            report_fallback_once()
     except Exception as e:
         # 关键：摘要失败不丢中段，退化为不压缩，避免灾难性失忆
         report("failed", str(e)[:300])
